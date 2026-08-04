@@ -2,10 +2,10 @@ import { z } from "zod";
 import type { OutreachOutput } from "./types";
 
 const unsupportedControlCharacters =
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: This intentionally rejects every C0 control character except tab and newline.
-  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: This intentionally rejects every C0/C1 control character except tab, newline, and carriage return.
+  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/u;
 const markdownHeading = /^\s{0,3}#{1,6}\s+/mu;
-const markdownLink = /\[[^\]]+\]\([^)]+\)|\[[^\]]+\]\[[^\]]*\]/u;
+const markdownLink = /\[[^\]]*\]\([^)]*\)|\[[^\]]*\]\[[^\]]*\]/u;
 const htmlTag = /<\/?[a-z][^>]*>/iu;
 
 const plainText = (min: number, max: number) =>

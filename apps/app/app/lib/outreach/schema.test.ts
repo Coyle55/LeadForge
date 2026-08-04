@@ -36,6 +36,18 @@ describe("validateOutreachOutput", () => {
     expect(() =>
       validateOutreachOutput({ ...valid, body: `${valid.body}\u0007` })
     ).toThrow();
+    expect(() =>
+      validateOutreachOutput({ ...valid, body: `${valid.body}\u009B` })
+    ).toThrow();
+  });
+
+  it("accepts CRLF-separated plain text", () => {
+    const body = valid.body.replaceAll("\n", "\r\n");
+
+    expect(validateOutreachOutput({ ...valid, body })).toEqual({
+      ...valid,
+      body,
+    });
   });
 
   it("rejects markdown and HTML decoration", () => {
@@ -53,6 +65,21 @@ describe("validateOutreachOutput", () => {
     ).toThrow();
     expect(() =>
       validateOutreachOutput({ ...valid, body: `<p>${valid.body}</p>` })
+    ).toThrow();
+  });
+
+  it("rejects markdown links with empty labels or destinations", () => {
+    expect(() =>
+      validateOutreachOutput({
+        ...valid,
+        body: `${valid.body}\n\n[](https://example.com)`,
+      })
+    ).toThrow();
+    expect(() =>
+      validateOutreachOutput({
+        ...valid,
+        body: `${valid.body}\n\n[Schedule]()`,
+      })
     ).toThrow();
   });
 });
