@@ -152,3 +152,55 @@ model OpportunityRecommendation {
   @@unique([analysisId, position])
   @@index([analysisId, impact])
 }
+
+model OutreachProfile {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  senderName       String
+  companyName      String
+  serviceOffered   String
+  valueProposition String
+  defaultCta       String
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+enum OutreachDraftStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+model OutreachDraft {
+  id                  String              @id @default(cuid())
+  userId              String
+  prospectId          String
+  analysisId          String
+  recommendationId    String
+  status              OutreachDraftStatus @default(RUNNING)
+  recipientName       String
+  recipientEmail      String
+  businessName        String
+  websiteHostname     String
+  recommendationTitle String
+  generatedSubject    String?
+  generatedBody       String?
+  subject             String?
+  body                String?
+  model               String
+  promptVersion       String
+  inputTokens         Int?
+  outputTokens        Int?
+  durationMs          Int?
+  failureCode         String?
+  failureMessage      String?
+  startedAt           DateTime            @default(now())
+  completedAt         DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+
+  @@index([userId, createdAt])
+  @@index([userId, prospectId, createdAt])
+  @@index([userId, analysisId, createdAt])
+  @@index([userId, recommendationId, createdAt])
+}
