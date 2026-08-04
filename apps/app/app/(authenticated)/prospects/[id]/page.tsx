@@ -8,7 +8,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/design-system/components/ui/card";
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import { getLatestProspectAudit } from "../../audits/queries";
+import { RunAuditButton } from "../../audits/run-audit-button";
 import { ProspectForm } from "../prospect-form";
 import { StatusButton } from "../status-button";
 
@@ -31,6 +34,7 @@ const ProspectDetailPage = async ({
   if (!prospect) {
     notFound();
   }
+  const latestAudit = await getLatestProspectAudit(userId, prospect.id);
 
   const initial = {
     businessName: prospect.businessName,
@@ -76,6 +80,43 @@ const ProspectDetailPage = async ({
             mode="edit"
             prospectId={prospect.id}
           />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Website audit</CardTitle>
+          <CardDescription>
+            Run deterministic checks against this prospect's public website.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex items-center justify-between gap-4">
+          <div className="text-sm">
+            {latestAudit ? (
+              <>
+                <p className="font-medium capitalize">
+                  Latest: {latestAudit.status.toLowerCase()}
+                </p>
+                <Link
+                  className="text-emerald-600 underline"
+                  href={`/audits/${latestAudit.id}`}
+                >
+                  View result
+                </Link>
+              </>
+            ) : (
+              <p className="text-muted-foreground">No audit run yet.</p>
+            )}
+          </div>
+          {prospect.websiteUrl ? (
+            <RunAuditButton
+              prospectId={prospect.id}
+              rerun={Boolean(latestAudit)}
+            />
+          ) : (
+            <Link className="text-sm underline" href="#business-details">
+              Add a website first
+            </Link>
+          )}
         </CardContent>
       </Card>
       <div className="border-t pt-6">

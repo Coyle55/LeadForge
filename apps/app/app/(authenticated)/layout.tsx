@@ -28,6 +28,7 @@ const AuthenticatedLayout = async ({
           <nav className="flex items-center gap-5 text-sm">
             <Link href="/">Dashboard</Link>
             <Link href="/prospects">Prospects</Link>
+            <Link href="/audits">Audits</Link>
             <Link href="/settings">Settings</Link>
             <UserButton />
           </nav>

@@ -38,6 +38,8 @@ The authenticated application routes are:
 - `/prospects` — searchable, status-filtered prospect list
 - `/prospects/new` — create a prospect
 - `/prospects/[id]` — edit, archive, or restore an owned prospect
+- `/audits` — owner-scoped website audit history
+- `/audits/[id]` — grouped audit evidence and rerun controls
 - `/settings` — update the owner's display name
 
 ## Commands
@@ -103,3 +105,20 @@ M0 has no prospecting, audits, AI, QStash, storage, outreach, tasks, deals, anal
 - `bun run migrate:deploy` applies the M1 prospect migration before deployment.
 
 M1 remains manual-only: no CSV workflow, discovery provider, audit, AI, outreach, task, deal, analytics, webhook, QStash, storage, or separate backend application is included.
+
+## M2 website audits
+
+M2 adds synchronous, user-triggered website audits for owned prospects. LeadForge validates public targets, respects robots.txt, crawls at most five same-origin HTML pages, and stores immutable pass/warning/fail findings across accessibility, trust, SEO, technical health, and HTTP/HTML performance indicators.
+
+No new environment variables or external accounts are required. M2 deliberately does not claim Lighthouse or Core Web Vitals results and adds no overall score, AI recommendation, screenshot, queue, webhook, storage service, or separate deployment.
+
+### M2 acceptance flow
+
+- Open a prospect with a public website and select Run audit.
+- A completed run redirects to `/audits/[id]` with 27 grouped deterministic checks.
+- Refresh preserves the result; `/audits` shows immutable run history newest first.
+- Run again creates another audit rather than overwriting evidence.
+- Private, local, robots-blocked, unreachable, oversized, and timed-out targets fail with safe stored messages.
+- All audit reads and writes remain scoped to the authenticated Clerk owner ID.
+
+Synchronous execution is capped at five pages, five redirects per request, two megabytes per response, five seconds per request, and twenty seconds for the run. Larger browser-based or asynchronous audits are deferred.

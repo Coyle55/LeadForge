@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit --emitDeclarationOnly false"
   },
   "dependencies": {
+    "@repo/audit-engine": "*",
     "@repo/auth": "*",
     "@repo/database": "*",
     "@repo/design-system": "*",
