@@ -7,8 +7,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@repo/design-system/components/ui/card";
-import { SettingsForm } from "./settings-form";
 import { OutreachProfileForm } from "./outreach-profile-form";
+import { SettingsForm } from "./settings-form";
 
 const SettingsPage = async () => {
   const user = await ensureCurrentUser();

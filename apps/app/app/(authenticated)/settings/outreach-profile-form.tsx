@@ -11,11 +11,11 @@ import {
 } from "../../actions/outreach-profile";
 
 interface OutreachProfileFields {
-  senderName: string;
   companyName: string;
+  defaultCta: string;
+  senderName: string;
   serviceOffered: string;
   valueProposition: string;
-  defaultCta: string;
 }
 
 export const OutreachProfileForm = ({

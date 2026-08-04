@@ -1,5 +1,6 @@
 import { auth } from "@repo/auth/server";
 import { Badge } from "@repo/design-system/components/ui/badge";
+import { Button } from "@repo/design-system/components/ui/button";
 import {
   Card,
   CardContent,
@@ -8,6 +9,8 @@ import {
 } from "@repo/design-system/components/ui/card";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { GenerateOutreachButton } from "../../outreach/generate-button";
+import { getOutreachReadiness } from "../../outreach/queries";
 import { getOpportunityDetail } from "../queries";
 
 const categoryLabels = {
@@ -17,6 +20,37 @@ const categoryLabels = {
   technical: "Technical",
   performance: "Performance",
 } as const;
+
+const RecommendationOutreachControl = ({
+  readiness,
+  prospectId,
+  recommendationId,
+}: {
+  readiness: Awaited<ReturnType<typeof getOutreachReadiness>>;
+  prospectId?: string;
+  recommendationId: string;
+}) => {
+  if (readiness.status === "ready") {
+    return <GenerateOutreachButton recommendationId={recommendationId} />;
+  }
+  if (readiness.status === "missing_contact" && prospectId) {
+    return (
+      <Button asChild size="sm" variant="outline">
+        <Link href={`/prospects/${prospectId}`}>
+          Add contact name and email
+        </Link>
+      </Button>
+    );
+  }
+  if (readiness.status === "missing_profile") {
+    return (
+      <Button asChild size="sm" variant="outline">
+        <Link href="/settings">Complete Outreach Profile</Link>
+      </Button>
+    );
+  }
+  return null;
+};
 
 const OpportunityDetailPage = async ({
   params,
@@ -75,6 +109,9 @@ const OpportunityDetailPage = async ({
   const checkLabels = new Map(
     analysis.audit?.checks.map((check) => [check.key, check.label]) ?? []
   );
+  const readiness = analysis.prospect
+    ? await getOutreachReadiness(userId, analysis.prospect.id)
+    : { status: "missing_contact" as const };
   return (
     <div className="mx-auto max-w-4xl space-y-8">
       <section className="grid gap-6 border-b pb-8 md:grid-cols-[1fr_auto] md:items-end">
@@ -130,7 +167,7 @@ const OpportunityDetailPage = async ({
         {analysis.recommendations.map((recommendation, index) => {
           const keys = recommendation.auditCheckKeys as string[];
           return (
-            <Card key={recommendation.id}>
+            <Card id={recommendation.id} key={recommendation.id}>
               <CardHeader>
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex gap-4">
@@ -167,6 +204,13 @@ const OpportunityDetailPage = async ({
                       {checkLabels.get(key) ?? key}
                     </Link>
                   ))}
+                </div>
+                <div className="border-t pt-4">
+                  <RecommendationOutreachControl
+                    prospectId={analysis.prospect?.id}
+                    readiness={readiness}
+                    recommendationId={recommendation.id}
+                  />
                 </div>
               </CardContent>
             </Card>

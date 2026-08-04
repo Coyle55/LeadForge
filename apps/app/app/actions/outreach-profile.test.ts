@@ -42,13 +42,13 @@ describe("updateOutreachProfile", () => {
   it("rejects signed-out and non-owner callers without writing", async () => {
     const { updateOutreachProfile } = await import("./outreach-profile");
     authMock.mockResolvedValueOnce({ userId: null });
-    await expect(
-      updateOutreachProfile({}, form(validValues))
-    ).resolves.toEqual({ status: "error", message: "Not authorized." });
+    await expect(updateOutreachProfile({}, form(validValues))).resolves.toEqual(
+      { status: "error", message: "Not authorized." }
+    );
     authMock.mockResolvedValueOnce({ userId: "user_other" });
-    await expect(
-      updateOutreachProfile({}, form(validValues))
-    ).resolves.toEqual({ status: "error", message: "Not authorized." });
+    await expect(updateOutreachProfile({}, form(validValues))).resolves.toEqual(
+      { status: "error", message: "Not authorized." }
+    );
     expect(upsertMock).not.toHaveBeenCalled();
   });
 
@@ -100,14 +100,17 @@ describe("updateOutreachProfile", () => {
     upsertMock.mockRejectedValue(new Error("database password leaked"));
     const { updateOutreachProfile } = await import("./outreach-profile");
 
-    await expect(
-      updateOutreachProfile({}, form(validValues))
-    ).resolves.toEqual({
-      status: "error",
-      message: "Unable to save outreach profile.",
-    });
-    expect(logErrorMock).toHaveBeenCalledWith("outreach_profile.update.failed", {
-      userId: "user_owner",
-    });
+    await expect(updateOutreachProfile({}, form(validValues))).resolves.toEqual(
+      {
+        status: "error",
+        message: "Unable to save outreach profile.",
+      }
+    );
+    expect(logErrorMock).toHaveBeenCalledWith(
+      "outreach_profile.update.failed",
+      {
+        userId: "user_owner",
+      }
+    );
   });
 });
