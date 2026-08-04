@@ -1,4 +1,4 @@
-import { parse, type DefaultTreeAdapterMap } from "parse5";
+import { type DefaultTreeAdapterMap, parse } from "parse5";
 import { AuditEngineError } from "./errors";
 import { isPathAllowed } from "./robots";
 import { resolveRedirectTarget, validatePublicTarget } from "./target-policy";
@@ -7,37 +7,43 @@ import type { AuditDependencies } from "./types";
 type Node = DefaultTreeAdapterMap["node"];
 type Element = DefaultTreeAdapterMap["element"];
 
+const REL_SPLIT = /\s+/;
+const HEADING = /^h([1-6])$/;
+const RESOURCE_ATTRIBUTE = /^(src|href)$/;
+const INSECURE_URL = /http:\/\//i;
+const AUTH_PATH = /(login|sign-in|account)/i;
+
 export interface PageFacts {
-  url: string;
-  title: string;
+  blockingResources: number;
+  canonical: string | null;
   description: string;
-  language: string;
+  externalScripts: number;
+  formControls: number;
   headings: number[];
+  htmlBytes: number;
   images: number;
   imagesWithAlt: number;
-  formControls: number;
-  labeledControls: number;
-  links: string[];
-  text: string;
-  canonical: string | null;
-  robotsMeta: string;
-  jsonLdCount: number;
-  viewport: boolean;
   insecureAssets: number;
-  externalScripts: number;
-  blockingResources: number;
-  htmlBytes: number;
+  jsonLdCount: number;
+  labeledControls: number;
+  language: string;
+  links: string[];
   responseMs: number;
+  robotsMeta: string;
   status: number;
+  text: string;
+  title: string;
+  url: string;
+  viewport: boolean;
 }
 
 export interface CrawlResult {
-  requestedUrl: string;
   finalUrl: string;
-  redirectCount: number;
+  pages: PageFacts[];
   pagesAttempted: number;
   pagesAudited: number;
-  pages: PageFacts[];
+  redirectCount: number;
+  requestedUrl: string;
   robotsAvailable: boolean;
 }
 
@@ -45,22 +51,26 @@ const attr = (element: Element | undefined, name: string) =>
   element?.attrs.find((item) => item.name.toLowerCase() === name)?.value ?? "";
 
 const elements = (node: Node, output: Element[] = []) => {
-  if ("tagName" in node) output.push(node);
+  if ("tagName" in node) {
+    output.push(node);
+  }
   if ("childNodes" in node) {
-    for (const child of node.childNodes) elements(child, output);
+    for (const child of node.childNodes) {
+      elements(child, output);
+    }
   }
   return output;
 };
 
 const textOf = (node: Node): string => {
-  if ("value" in node) return node.value;
+  if ("value" in node) {
+    return node.value;
+  }
   return "childNodes" in node ? node.childNodes.map(textOf).join(" ") : "";
 };
 
-const fetchHtml = async (
-  initialUrl: URL,
-  dependencies: AuditDependencies
-) => {
+// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: Fetch policy intentionally validates each safety boundary inline.
+const fetchHtml = async (initialUrl: URL, dependencies: AuditDependencies) => {
   const fetcher = dependencies.fetch ?? fetch;
   let url = initialUrl;
   let redirects = 0;
@@ -90,7 +100,7 @@ const fetchHtml = async (
       continue;
     }
     const type = response.headers.get("content-type") ?? "";
-    if (!response.ok || !type.toLowerCase().includes("text/html")) {
+    if (!(response.ok && type.toLowerCase().includes("text/html"))) {
       throw new AuditEngineError("INVALID_RESPONSE");
     }
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -136,7 +146,7 @@ const parseFacts = (
     ["script", "link", "img"].includes(node.tagName)
   );
   const canonical = find("link").find((node) =>
-    attr(node, "rel").toLowerCase().split(/\s+/).includes("canonical")
+    attr(node, "rel").toLowerCase().split(REL_SPLIT).includes("canonical")
   );
   return {
     url: result.url.href,
@@ -144,22 +154,38 @@ const parseFacts = (
     description: attr(meta("description"), "content"),
     language: attr(find("html")[0], "lang"),
     headings: nodes
-      .map((node) => /^h([1-6])$/.exec(node.tagName)?.[1])
+      .map((node) => HEADING.exec(node.tagName)?.[1])
       .filter(Boolean)
       .map(Number),
     images: images.length,
-    imagesWithAlt: images.filter((node) => node.attrs.some((item) => item.name === "alt")).length,
+    imagesWithAlt: images.filter((node) =>
+      node.attrs.some((item) => item.name === "alt")
+    ).length,
     formControls: controls.length,
-    labeledControls: controls.filter((node) => labelsFor.has(attr(node, "id")) || attr(node, "aria-label")).length,
+    labeledControls: controls.filter(
+      (node) => labelsFor.has(attr(node, "id")) || attr(node, "aria-label")
+    ).length,
     links,
     text: textOf(document).replace(/\s+/g, " ").trim(),
     canonical: canonical ? attr(canonical, "href") : null,
     robotsMeta: attr(meta("robots"), "content"),
-    jsonLdCount: find("script").filter((node) => attr(node, "type") === "application/ld+json").length,
+    jsonLdCount: find("script").filter(
+      (node) => attr(node, "type") === "application/ld+json"
+    ).length,
     viewport: Boolean(meta("viewport")),
-    insecureAssets: resources.filter((node) => /^(src|href)$/.test(node.attrs[0]?.name ?? "") && /http:\/\//i.test(node.attrs[0]?.value ?? "")).length,
-    externalScripts: find("script").filter((node) => Boolean(attr(node, "src"))).length,
-    blockingResources: find("script").filter((node) => attr(node, "src") && !(attr(node, "async") || attr(node, "defer"))).length + find("link").filter((node) => attr(node, "rel") === "stylesheet").length,
+    insecureAssets: resources.filter(
+      (node) =>
+        RESOURCE_ATTRIBUTE.test(node.attrs[0]?.name ?? "") &&
+        INSECURE_URL.test(node.attrs[0]?.value ?? "")
+    ).length,
+    externalScripts: find("script").filter((node) => Boolean(attr(node, "src")))
+      .length,
+    blockingResources:
+      find("script").filter(
+        (node) =>
+          attr(node, "src") && !(attr(node, "async") || attr(node, "defer"))
+      ).length +
+      find("link").filter((node) => attr(node, "rel") === "stylesheet").length,
     htmlBytes: result.htmlBytes,
     responseMs: result.responseMs,
     status: result.status,
@@ -167,7 +193,15 @@ const parseFacts = (
 };
 
 const preferredScore = (url: string) => {
-  const index = ["contact", "about", "services", "pricing", "privacy", "terms", "legal"].findIndex((word) => url.toLowerCase().includes(word));
+  const index = [
+    "contact",
+    "about",
+    "services",
+    "pricing",
+    "privacy",
+    "terms",
+    "legal",
+  ].findIndex((word) => url.toLowerCase().includes(word));
   return index === -1 ? 99 : index;
 };
 
@@ -180,7 +214,9 @@ export const crawlWebsite = async (
   let robotsText = "";
   let robotsAvailable = false;
   try {
-    const response = await (dependencies.fetch ?? fetch)(robotsUrl, { headers: { "user-agent": "LeadForgeAudit/1.0" } });
+    const response = await (dependencies.fetch ?? fetch)(robotsUrl, {
+      headers: { "user-agent": "LeadForgeAudit/1.0" },
+    });
     if (response.ok) {
       robotsText = await response.text();
       robotsAvailable = true;
@@ -197,13 +233,19 @@ export const crawlWebsite = async (
   const candidates = [...new Set(first.links)]
     .filter((href) => {
       const url = new URL(href);
-      return url.origin === origin && isPathAllowed(robotsText, url.pathname) && !/(login|sign-in|account)/i.test(url.pathname);
+      return (
+        url.origin === origin &&
+        isPathAllowed(robotsText, url.pathname) &&
+        !AUTH_PATH.test(url.pathname)
+      );
     })
     .sort((a, b) => preferredScore(a) - preferredScore(b));
   const pages = [first];
   let pagesAttempted = 1;
   for (const candidate of candidates) {
-    if (pages.length >= 5) break;
+    if (pages.length >= 5) {
+      break;
+    }
     pagesAttempted += 1;
     try {
       pages.push(parseFacts(await fetchHtml(new URL(candidate), dependencies)));

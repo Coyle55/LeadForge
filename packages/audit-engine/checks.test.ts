@@ -46,10 +46,23 @@ describe("evaluateChecks", () => {
 
   it("applies accessibility and performance thresholds", () => {
     const findings = evaluateChecks(
-      crawl(page({ images: 10, imagesWithAlt: 6, responseMs: 1600, htmlBytes: 800_000 }))
+      crawl(
+        page({
+          images: 10,
+          imagesWithAlt: 6,
+          responseMs: 1600,
+          htmlBytes: 800_000,
+        })
+      )
     );
-    expect(findings.find(({ key }) => key === "image_alt_coverage")?.status).toBe("FAIL");
-    expect(findings.find(({ key }) => key === "server_response_time")?.status).toBe("FAIL");
-    expect(findings.find(({ key }) => key === "html_size")?.status).toBe("FAIL");
+    expect(
+      findings.find(({ key }) => key === "image_alt_coverage")?.status
+    ).toBe("FAIL");
+    expect(
+      findings.find(({ key }) => key === "server_response_time")?.status
+    ).toBe("FAIL");
+    expect(findings.find(({ key }) => key === "html_size")?.status).toBe(
+      "FAIL"
+    );
   });
 });

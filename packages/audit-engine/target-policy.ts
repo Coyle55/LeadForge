@@ -13,7 +13,9 @@ const parseIpv4 = (address: string) => {
 
 const isPublicIpv4 = (address: string) => {
   const parts = parseIpv4(address);
-  if (!parts) return false;
+  if (!parts) {
+    return false;
+  }
   const [a, b] = parts;
   return !(
     a === 0 ||
@@ -32,8 +34,12 @@ const isPublicIpv4 = (address: string) => {
 };
 
 const isPublicIp = (address: string) => {
-  if (isIP(address) === 4) return isPublicIpv4(address);
-  if (isIP(address) !== 6) return false;
+  if (isIP(address) === 4) {
+    return isPublicIpv4(address);
+  }
+  if (isIP(address) !== 6) {
+    return false;
+  }
   const value = address.toLowerCase();
   return !(
     value === "::" ||

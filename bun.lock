@@ -18,6 +18,7 @@
     "apps/app": {
       "name": "app",
       "dependencies": {
+        "@repo/audit-engine": "*",
         "@repo/auth": "*",
         "@repo/database": "*",
         "@repo/design-system": "*",
