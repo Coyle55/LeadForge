@@ -17,3 +17,27 @@ model User {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+enum ProspectStatus {
+  NEW
+  QUALIFIED
+  ARCHIVED
+}
+
+model Prospect {
+  id           String         @id @default(cuid())
+  userId       String
+  businessName String
+  websiteUrl   String?
+  contactName  String?
+  contactEmail String?
+  phone        String?
+  location     String?
+  notes        String?
+  status       ProspectStatus @default(NEW)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([userId, status])
+  @@index([userId, createdAt])
+}
