@@ -28,6 +28,7 @@ const page = (overrides: Partial<PageFacts> = {}): PageFacts => ({
 });
 
 const crawl = (facts = page()): CrawlResult => ({
+  brokenInternalLinks: 0,
   requestedUrl: facts.url,
   finalUrl: facts.url,
   redirectCount: 0,

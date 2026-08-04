@@ -73,7 +73,7 @@ export const evaluateChecks = (crawl: CrawlResult): AuditFinding[] => {
   const noindex = count((page) =>
     page.robotsMeta.toLowerCase().includes("noindex")
   );
-  const brokenLinks = 0;
+  const brokenLinks = crawl.brokenInternalLinks;
   const hasContactPath = CONTACT_PATH.test(combined);
   const hasContactSignals = CONTACT_SIGNALS.test(combined);
   const hasCallToAction = CALL_TO_ACTION.test(combined);

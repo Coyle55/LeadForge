@@ -38,6 +38,7 @@ export interface PageFacts {
 }
 
 export interface CrawlResult {
+  brokenInternalLinks: number;
   finalUrl: string;
   pages: PageFacts[];
   pagesAttempted: number;
@@ -253,7 +254,28 @@ export const crawlWebsite = async (
       // A sampled internal-page failure is evidence for later checks, not a fatal run.
     }
   }
+  let brokenInternalLinks = 0;
+  const sampledLinks = [...new Set(pages.flatMap((page) => page.links))]
+    .filter((href) => new URL(href).origin === origin)
+    .slice(0, 20);
+  for (const href of sampledLinks) {
+    try {
+      await validatePublicTarget(href, dependencies);
+      const response = await (dependencies.fetch ?? fetch)(href, {
+        method: "HEAD",
+        redirect: "manual",
+        signal: AbortSignal.timeout(5000),
+        headers: { "user-agent": "LeadForgeAudit/1.0" },
+      });
+      if (response.status >= 400) {
+        brokenInternalLinks += 1;
+      }
+    } catch {
+      brokenInternalLinks += 1;
+    }
+  }
   return {
+    brokenInternalLinks,
     requestedUrl: requested.href,
     finalUrl: homepage.url.href,
     redirectCount: homepage.redirects,
