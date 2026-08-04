@@ -41,3 +41,59 @@ model Prospect {
   @@index([userId, status])
   @@index([userId, createdAt])
 }
+
+enum WebsiteAuditStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum AuditCheckStatus {
+  PASS
+  WARNING
+  FAIL
+}
+
+enum AuditCheckCategory {
+  ACCESSIBILITY
+  TRUST
+  SEO
+  TECHNICAL
+  PERFORMANCE
+}
+
+model WebsiteAudit {
+  id             String             @id @default(cuid())
+  userId         String
+  prospectId     String
+  requestedUrl   String
+  finalUrl       String?
+  status         WebsiteAuditStatus @default(RUNNING)
+  failureCode    String?
+  failureMessage String?
+  pagesAttempted Int                @default(0)
+  pagesAudited   Int                @default(0)
+  durationMs     Int?
+  startedAt      DateTime           @default(now())
+  completedAt    DateTime?
+  createdAt      DateTime           @default(now())
+  checks         AuditCheck[]
+
+  @@index([userId, createdAt])
+  @@index([userId, prospectId, createdAt])
+}
+
+model AuditCheck {
+  id       String             @id @default(cuid())
+  auditId  String
+  category AuditCheckCategory
+  key      String
+  label    String
+  status   AuditCheckStatus
+  summary  String
+  evidence Json
+  audit    WebsiteAudit       @relation(fields: [auditId], references: [id], onDelete: Cascade)
+
+  @@unique([auditId, key])
+  @@index([auditId, category, status])
+}
