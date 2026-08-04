@@ -97,3 +97,58 @@ model AuditCheck {
   @@unique([auditId, key])
   @@index([auditId, category, status])
 }
+
+enum OpportunityAnalysisStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum RecommendationLevel {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+model OpportunityAnalysis {
+  id               String                      @id @default(cuid())
+  userId           String
+  prospectId       String
+  auditId          String
+  status           OpportunityAnalysisStatus   @default(RUNNING)
+  overallScore     Int?
+  categoryScores   Json?
+  executiveSummary String?
+  overallRationale String?
+  model            String
+  promptVersion    String
+  inputTokens      Int?
+  outputTokens     Int?
+  durationMs       Int?
+  failureCode      String?
+  failureMessage   String?
+  startedAt        DateTime                    @default(now())
+  completedAt      DateTime?
+  createdAt        DateTime                    @default(now())
+  recommendations  OpportunityRecommendation[]
+
+  @@index([userId, createdAt])
+  @@index([userId, prospectId, createdAt])
+  @@index([userId, auditId, createdAt])
+}
+
+model OpportunityRecommendation {
+  id             String              @id @default(cuid())
+  analysisId     String
+  position       Int
+  title          String
+  impact         RecommendationLevel
+  effort         RecommendationLevel
+  rationale      String
+  action         String
+  auditCheckKeys Json
+  analysis       OpportunityAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+
+  @@unique([analysisId, position])
+  @@index([analysisId, impact])
+}
