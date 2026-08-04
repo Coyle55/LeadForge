@@ -1,6 +1,6 @@
 # LeadForge
 
-LeadForge M0 is a private, single-user dashboard. It uses Clerk for authentication, Neon-compatible PostgreSQL through Prisma, and a Clerk user-ID allowlist. The application creates or refreshes its local `User` row during normal signed-in use; no webhook or separate API service is required.
+LeadForge is a private, single-owner lead workspace. M0 established Clerk authentication, a PostgreSQL-backed user profile, and a Clerk user-ID allowlist. M1 adds manual prospect creation, search, editing, archiving, and restoration without adding discovery providers or backend services.
 
 ## Requirements
 
@@ -31,6 +31,14 @@ The dashboard runs at `http://localhost:3000`. Prisma Studio is available withou
 ```bash
 bun run db:studio
 ```
+
+The authenticated application routes are:
+
+- `/` — account and database overview
+- `/prospects` — searchable, status-filtered prospect list
+- `/prospects/new` — create a prospect
+- `/prospects/[id]` — edit, archive, or restore an owned prospect
+- `/settings` — update the owner's display name
 
 ## Commands
 
@@ -83,3 +91,15 @@ These steps require the repository owner's credentials and are intentionally not
 ## M0 non-goals
 
 M0 has no prospecting, audits, AI, QStash, storage, outreach, tasks, deals, analytics, placeholder navigation, webhooks, or separate backend services.
+
+## M1 acceptance flow
+
+- The owner creates a prospect and sees it first in the Active list.
+- Search and status filters return only owner-scoped records.
+- Editing persists after refresh.
+- Archiving removes the record from Active; Archived shows it; Restore returns it to Active.
+- Missing and other-owner records are not disclosed.
+- `bun run check`, `bun run test`, and `bun run build` pass.
+- `bun run migrate:deploy` applies the M1 prospect migration before deployment.
+
+M1 remains manual-only: no CSV workflow, discovery provider, audit, AI, outreach, task, deal, analytics, webhook, QStash, storage, or separate backend application is included.
