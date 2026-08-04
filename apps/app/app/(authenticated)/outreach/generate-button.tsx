@@ -9,8 +9,10 @@ import {
 } from "../../actions/outreach";
 
 export const GenerateOutreachButton = ({
+  label = "Draft outreach",
   recommendationId,
 }: {
+  label?: string;
   recommendationId: string;
 }) => {
   const [pending, startTransition] = useTransition();
@@ -32,7 +34,7 @@ export const GenerateOutreachButton = ({
         }
         size="sm"
       >
-        {pending ? "Drafting…" : "Draft outreach"}
+        {pending ? "Drafting…" : label}
       </Button>
       {error ? (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">

@@ -6,6 +6,8 @@ const draftFindFirstMock = vi.fn();
 const prospectFindManyMock = vi.fn();
 const prospectFindFirstMock = vi.fn();
 const profileFindUniqueMock = vi.fn();
+const recommendationFindFirstMock = vi.fn();
+const auditFindFirstMock = vi.fn();
 
 vi.mock("@repo/database", () => ({
   database: {
@@ -15,6 +17,8 @@ vi.mock("@repo/database", () => ({
       findMany: draftFindManyMock,
     },
     outreachProfile: { findUnique: profileFindUniqueMock },
+    opportunityRecommendation: { findFirst: recommendationFindFirstMock },
+    websiteAudit: { findFirst: auditFindFirstMock },
     prospect: {
       findFirst: prospectFindFirstMock,
       findMany: prospectFindManyMock,
@@ -33,6 +37,8 @@ describe("outreach queries", () => {
       contactName: "Jordan",
     });
     profileFindUniqueMock.mockResolvedValue({ id: "profile_1" });
+    recommendationFindFirstMock.mockResolvedValue(null);
+    auditFindFirstMock.mockResolvedValue(null);
   });
 
   it("defaults to completed drafts and normalizes a failed filter", async () => {
@@ -100,6 +106,69 @@ describe("outreach queries", () => {
     ).resolves.toBeNull();
     expect(draftFindFirstMock).toHaveBeenCalledWith({
       where: { id: "draft_1", userId: "user_owner" },
+    });
+  });
+
+  it("loads source audit evidence through owner-scoped analysis and audit reads", async () => {
+    draftFindFirstMock.mockResolvedValue({
+      id: "draft_1",
+      userId: "user_owner",
+      analysisId: "analysis_1",
+      recommendationId: "recommendation_1",
+    });
+    recommendationFindFirstMock.mockResolvedValue({
+      auditCheckKeys: ["contact_path", "mobile_viewport"],
+      analysis: { auditId: "audit_1" },
+    });
+    auditFindFirstMock.mockResolvedValue({
+      id: "audit_1",
+      checks: [
+        { key: "contact_path", label: "Contact paths" },
+        { key: "mobile_viewport", label: "Mobile viewport" },
+      ],
+    });
+    const { getOutreachDraftDetail } = await import("./queries");
+
+    await expect(
+      getOutreachDraftDetail("user_owner", "draft_1")
+    ).resolves.toEqual({
+      id: "draft_1",
+      userId: "user_owner",
+      analysisId: "analysis_1",
+      recommendationId: "recommendation_1",
+      sourceAudit: {
+        id: "audit_1",
+        evidence: [
+          { key: "contact_path", label: "Contact paths" },
+          { key: "mobile_viewport", label: "Mobile viewport" },
+        ],
+      },
+    });
+    expect(recommendationFindFirstMock).toHaveBeenCalledWith({
+      where: {
+        id: "recommendation_1",
+        analysis: { id: "analysis_1", userId: "user_owner" },
+      },
+      select: {
+        analysis: { select: { auditId: true } },
+        auditCheckKeys: true,
+      },
+    });
+    expect(auditFindFirstMock).toHaveBeenCalledWith({
+      where: {
+        id: "audit_1",
+        userId: "user_owner",
+        status: "COMPLETED",
+      },
+      select: {
+        id: true,
+        checks: {
+          where: {
+            key: { in: ["contact_path", "mobile_viewport"] },
+          },
+          select: { key: true, label: true },
+        },
+      },
     });
   });
 

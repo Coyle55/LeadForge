@@ -8,6 +8,8 @@ const profileFindMock = vi.fn();
 const draftFindMock = vi.fn();
 const draftCreateMock = vi.fn();
 const draftUpdateMock = vi.fn();
+const transactionMock = vi.fn();
+const transactionQueryMock = vi.fn();
 const buildInputMock = vi.fn();
 const generateMock = vi.fn();
 const redirectMock = vi.fn();
@@ -24,6 +26,7 @@ vi.mock("@repo/auth", () => ({
 }));
 vi.mock("@repo/database", () => ({
   database: {
+    $transaction: transactionMock,
     opportunityRecommendation: { findFirst: recommendationFindMock },
     prospect: { findFirst: prospectFindMock },
     websiteAudit: { findFirst: auditFindMock },
@@ -31,7 +34,7 @@ vi.mock("@repo/database", () => ({
     outreachDraft: {
       findFirst: draftFindMock,
       create: draftCreateMock,
-      update: draftUpdateMock,
+      updateMany: draftUpdateMock,
     },
   },
 }));
@@ -153,7 +156,17 @@ describe("generateOutreachDraft", () => {
     profileFindMock.mockResolvedValue(profile);
     draftFindMock.mockResolvedValue(null);
     draftCreateMock.mockResolvedValue({ id: "draft_1" });
-    draftUpdateMock.mockResolvedValue({});
+    draftUpdateMock.mockResolvedValue({ count: 1 });
+    transactionQueryMock.mockResolvedValue([{ pg_advisory_xact_lock: null }]);
+    transactionMock.mockImplementation(async (callback) =>
+      callback({
+        $queryRaw: transactionQueryMock,
+        outreachDraft: {
+          create: draftCreateMock,
+          findFirst: draftFindMock,
+        },
+      })
+    );
     buildInputMock.mockReturnValue({
       recipientFirstName: "Jordan",
       businessName: "Acme",
@@ -338,6 +351,65 @@ describe("generateOutreachDraft", () => {
     expect(generateMock).not.toHaveBeenCalled();
   });
 
+  it("serializes concurrent reservations so only one paid generation starts", async () => {
+    let activeDraft: { id: string } | null = null;
+    let releaseGeneration: (() => void) | undefined;
+    const generationCanFinish = new Promise<void>((resolve) => {
+      releaseGeneration = resolve;
+    });
+    draftFindMock.mockImplementation(async () => activeDraft);
+    draftCreateMock.mockImplementation(() => {
+      activeDraft = { id: "draft_1" };
+      return activeDraft;
+    });
+    generateMock.mockImplementation(async () => {
+      await generationCanFinish;
+      return {
+        output: {
+          subject: "A quick thought about Acme",
+          body: "Hi Jordan,\n\nI noticed a direct contact path was not found.",
+        },
+        inputTokens: 100,
+        outputTokens: 80,
+        durationMs: 500,
+      };
+    });
+
+    let transactionTail = Promise.resolve<unknown>(undefined);
+    transactionMock.mockImplementation((callback) => {
+      const result = transactionTail.then(() =>
+        callback({
+          $queryRaw: transactionQueryMock,
+          outreachDraft: {
+            create: draftCreateMock,
+            findFirst: draftFindMock,
+          },
+        })
+      );
+      transactionTail = result.then(
+        () => undefined,
+        () => undefined
+      );
+      return result;
+    });
+
+    const { generateOutreachDraft } = await import("./outreach");
+    const first = generateOutreachDraft("recommendation_1");
+    const second = generateOutreachDraft("recommendation_1");
+
+    for (let turn = 0; turn < 20; turn += 1) {
+      await Promise.resolve();
+    }
+    releaseGeneration?.();
+    await Promise.all([first, second]);
+
+    expect(redirectMock).toHaveBeenCalledWith("/outreach/draft_1");
+    expect(transactionMock).toHaveBeenCalledTimes(2);
+    expect(transactionQueryMock).toHaveBeenCalledTimes(2);
+    expect(draftCreateMock).toHaveBeenCalledTimes(1);
+    expect(generateMock).toHaveBeenCalledTimes(1);
+  });
+
   it("creates a running draft before generation and completes matching immutable and working copies", async () => {
     const events: string[] = [];
     draftCreateMock.mockImplementation(() => {
@@ -408,7 +480,7 @@ describe("generateOutreachDraft", () => {
       }
     );
     expect(draftUpdateMock).toHaveBeenCalledWith({
-      where: { id: "draft_1" },
+      where: { id: "draft_1", status: "RUNNING", userId: "user_owner" },
       data: {
         status: "COMPLETED",
         generatedSubject: "A quick thought about Acme",
@@ -493,7 +565,7 @@ describe("generateOutreachDraft", () => {
     await generateOutreachDraft("recommendation_1");
 
     expect(draftUpdateMock).toHaveBeenCalledWith({
-      where: { id: "draft_1" },
+      where: { id: "draft_1", status: "RUNNING", userId: "user_owner" },
       data: {
         status: "FAILED",
         generatedSubject: null,
@@ -547,6 +619,31 @@ describe("generateOutreachDraft", () => {
     expect(redirectMock).not.toHaveBeenCalled();
   });
 
+  it("refuses to replace a terminal draft or its generated snapshot on completion", async () => {
+    draftUpdateMock.mockResolvedValueOnce({ count: 0 });
+    const { generateOutreachDraft } = await import("./outreach");
+
+    await expect(generateOutreachDraft("recommendation_1")).resolves.toEqual({
+      status: "error",
+      message: "Unable to save outreach draft.",
+    });
+
+    expect(draftUpdateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "draft_1",
+          status: "RUNNING",
+          userId: "user_owner",
+        },
+      })
+    );
+    expect(loggerInfoMock).not.toHaveBeenCalledWith(
+      "outreach.generation.succeeded",
+      expect.anything()
+    );
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
   it("returns a safe persistence error when the failed draft cannot be saved", async () => {
     generateMock.mockRejectedValue(
       Object.assign(new Error("provider details"), { code: "GATEWAY_ERROR" })
@@ -571,6 +668,34 @@ describe("generateOutreachDraft", () => {
         promptVersion: "outreach-v1",
         failureCode: "GATEWAY_ERROR",
       }
+    );
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses to rewrite a terminal draft with failure metadata", async () => {
+    generateMock.mockRejectedValue(
+      Object.assign(new Error("provider details"), { code: "TIMEOUT" })
+    );
+    draftUpdateMock.mockResolvedValueOnce({ count: 0 });
+    const { generateOutreachDraft } = await import("./outreach");
+
+    await expect(generateOutreachDraft("recommendation_1")).resolves.toEqual({
+      status: "error",
+      message: "Unable to save outreach draft.",
+    });
+
+    expect(draftUpdateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "draft_1",
+          status: "RUNNING",
+          userId: "user_owner",
+        },
+      })
+    );
+    expect(loggerErrorMock).not.toHaveBeenCalledWith(
+      "outreach.generation.failed",
+      expect.anything()
     );
     expect(redirectMock).not.toHaveBeenCalled();
   });

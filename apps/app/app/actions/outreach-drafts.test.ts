@@ -111,7 +111,10 @@ describe("outreach draft actions", () => {
   });
 
   it("returns a safe persistence error while logging only action metadata", async () => {
-    const persistenceError = new Error("database password leaked");
+    const persistenceError = Object.assign(
+      new Error("database password leaked; subject: Confidential subject"),
+      { databaseDetail: "body: Confidential generated body" }
+    );
     draftUpdateManyMock.mockRejectedValue(persistenceError);
     const { updateOutreachDraft } = await import("./outreach-drafts");
 
@@ -126,10 +129,14 @@ describe("outreach draft actions", () => {
       {
         action: "update",
         draftId: "draft_1",
-        error: persistenceError,
+        persistenceCode: "DATABASE_WRITE_FAILED",
         userId: "user_owner",
       }
     );
+    const logged = JSON.stringify(loggerErrorMock.mock.calls);
+    expect(logged).not.toContain("database password leaked");
+    expect(logged).not.toContain("Confidential subject");
+    expect(logged).not.toContain("Confidential generated body");
   });
 
   it("resets a completed owner draft from stored immutable values only", async () => {

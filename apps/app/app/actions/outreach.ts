@@ -63,8 +63,12 @@ const persistFailedDraft = async ({
   failureCode: string;
 }) => {
   try {
-    await database.outreachDraft.update({
-      where: { id: context.draftId },
+    const result = await database.outreachDraft.updateMany({
+      where: {
+        id: context.draftId,
+        userId: context.userId,
+        status: "RUNNING",
+      },
       data: {
         status: "FAILED",
         generatedSubject: null,
@@ -76,6 +80,14 @@ const persistFailedDraft = async ({
         completedAt: new Date(),
       },
     });
+    if (result.count !== 1) {
+      logger.error("outreach.persistence.failed", {
+        ...context,
+        failureCode,
+        persistenceCode: "DRAFT_NOT_RUNNING",
+      });
+      return false;
+    }
   } catch {
     logger.error("outreach.persistence.failed", { ...context, failureCode });
     return false;
@@ -93,8 +105,12 @@ const persistCompletedDraft = async ({
   generated: Awaited<ReturnType<typeof generateOutreach>>;
 }) => {
   try {
-    await database.outreachDraft.update({
-      where: { id: context.draftId },
+    const result = await database.outreachDraft.updateMany({
+      where: {
+        id: context.draftId,
+        userId: context.userId,
+        status: "RUNNING",
+      },
       data: {
         status: "COMPLETED",
         generatedSubject: generated.output.subject,
@@ -109,6 +125,13 @@ const persistCompletedDraft = async ({
         completedAt: new Date(),
       },
     });
+    if (result.count !== 1) {
+      logger.error("outreach.persistence.failed", {
+        ...context,
+        persistenceCode: "DRAFT_NOT_RUNNING",
+      });
+      return false;
+    }
   } catch {
     logger.error("outreach.persistence.failed", { ...context });
     return false;
@@ -196,41 +219,51 @@ export const generateOutreachDraft = async (
     };
   }
 
-  const recent = await database.outreachDraft.findFirst({
-    where: {
-      userId,
-      recommendationId,
-      status: "RUNNING",
-      createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) },
-    },
-    select: { id: true },
-  });
-  if (recent) {
-    redirect(`/outreach/${recent.id}`);
-    return;
-  }
-
   const contactName = prospect.contactName.trim();
   const contactEmail = prospect.contactEmail.trim();
   const websiteHostname = new URL(audit.requestedUrl).hostname;
-  let draft: { id: string };
+  let reservation:
+    | { kind: "created"; draft: { id: string } }
+    | { kind: "existing"; draft: { id: string } };
   try {
-    draft = await database.outreachDraft.create({
-      data: {
-        userId,
-        prospectId: prospect.id,
-        analysisId: recommendation.analysis.id,
-        recommendationId: recommendation.id,
-        status: "RUNNING",
-        recipientName: contactName,
-        recipientEmail: contactEmail,
-        businessName: prospect.businessName,
-        websiteHostname,
-        recommendationTitle: recommendation.title,
-        model,
-        promptVersion: OUTREACH_PROMPT_VERSION,
-      },
-      select: { id: true },
+    reservation = await database.$transaction(async (transaction) => {
+      const generationLockKey = JSON.stringify([userId, recommendationId]);
+      await transaction.$queryRaw<Array<{ lockAcquired: number }>>`
+        SELECT 1 AS "lockAcquired"
+        FROM pg_advisory_xact_lock(hashtextextended(${generationLockKey}, 0))
+      `;
+
+      const recent = await transaction.outreachDraft.findFirst({
+        where: {
+          userId,
+          recommendationId,
+          status: "RUNNING",
+          createdAt: { gte: new Date(Date.now() - 5 * 60 * 1000) },
+        },
+        select: { id: true },
+      });
+      if (recent) {
+        return { kind: "existing" as const, draft: recent };
+      }
+
+      const draft = await transaction.outreachDraft.create({
+        data: {
+          userId,
+          prospectId: prospect.id,
+          analysisId: recommendation.analysis.id,
+          recommendationId: recommendation.id,
+          status: "RUNNING",
+          recipientName: contactName,
+          recipientEmail: contactEmail,
+          businessName: prospect.businessName,
+          websiteHostname,
+          recommendationTitle: recommendation.title,
+          model,
+          promptVersion: OUTREACH_PROMPT_VERSION,
+        },
+        select: { id: true },
+      });
+      return { kind: "created" as const, draft };
     });
   } catch {
     logger.error("outreach.persistence.failed", {
@@ -243,6 +276,12 @@ export const generateOutreachDraft = async (
     });
     return { status: "error", message: "Unable to start outreach draft." };
   }
+
+  if (reservation.kind === "existing") {
+    redirect(`/outreach/${reservation.draft.id}`);
+    return;
+  }
+  const { draft } = reservation;
 
   logger.info("outreach.generation.started", {
     userId,

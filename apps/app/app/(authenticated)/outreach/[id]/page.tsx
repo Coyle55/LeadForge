@@ -11,6 +11,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getOutreachDraftDetail } from "../queries";
 import { DraftEditor } from "./draft-editor";
+import { DraftSourceActions } from "./source-actions";
 
 const DraftDetailPage = async ({
   params,
@@ -154,6 +155,11 @@ const DraftDetailPage = async ({
             </Link>
             <span>{draft.websiteHostname}</span>
           </div>
+          <DraftSourceActions
+            auditId={draft.sourceAudit?.id}
+            evidence={draft.sourceAudit?.evidence ?? []}
+            recommendationId={draft.recommendationId}
+          />
         </CardHeader>
         <CardContent className="pt-6">
           <DraftEditor

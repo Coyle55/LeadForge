@@ -59,8 +59,68 @@ export const getOutreachDrafts = async ({
   };
 };
 
-export const getOutreachDraftDetail = async (userId: string, draftId: string) =>
-  await database.outreachDraft.findFirst({ where: { id: draftId, userId } });
+export const getOutreachDraftDetail = async (
+  userId: string,
+  draftId: string
+) => {
+  const draft = await database.outreachDraft.findFirst({
+    where: { id: draftId, userId },
+  });
+  if (!draft) {
+    return null;
+  }
+
+  const recommendation = await database.opportunityRecommendation.findFirst({
+    where: {
+      id: draft.recommendationId,
+      analysis: { id: draft.analysisId, userId },
+    },
+    select: {
+      analysis: { select: { auditId: true } },
+      auditCheckKeys: true,
+    },
+  });
+  if (!recommendation) {
+    return { ...draft, sourceAudit: null };
+  }
+
+  const auditCheckKeys = Array.isArray(recommendation.auditCheckKeys)
+    ? recommendation.auditCheckKeys.filter(
+        (key): key is string => typeof key === "string"
+      )
+    : [];
+  const audit = await database.websiteAudit.findFirst({
+    where: {
+      id: recommendation.analysis.auditId,
+      userId,
+      status: "COMPLETED",
+    },
+    select: {
+      id: true,
+      checks: {
+        where: { key: { in: auditCheckKeys } },
+        select: { key: true, label: true },
+      },
+    },
+  });
+  if (!audit) {
+    return { ...draft, sourceAudit: null };
+  }
+
+  const evidenceByKey = new Map(
+    audit.checks.map((check) => [check.key, check])
+  );
+  return {
+    ...draft,
+    sourceAudit: {
+      id: audit.id,
+      evidence: auditCheckKeys.flatMap((key) => {
+        const evidence = evidenceByKey.get(key);
+        return evidence ? [evidence] : [];
+      }),
+    },
+  };
+};
 
 export const getOutreachReadiness = async (
   userId: string,

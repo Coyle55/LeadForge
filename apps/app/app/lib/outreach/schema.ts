@@ -6,6 +6,12 @@ const unsupportedControlCharacters =
   /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/u;
 const markdownHeading = /^\s{0,3}#{1,6}\s+/mu;
 const markdownLink = /\[[^\]]*\]\([^)]*\)|\[[^\]]*\]\[[^\]]*\]/u;
+const markdownCodeFence = /^\s{0,3}(?:`{3,}|~{3,})/mu;
+const markdownInlineCode = /(^|[^`])`[^`\r\n]+`(?!`)/u;
+const markdownStrong = /(\*\*|__)(?=\S)[^\r\n]*?\S\1/u;
+const markdownEmphasis =
+  /(^|[\s([{])([*_])(?=\S)[^*_\r\n]*?\S\2(?=$|[\s)\]},.!?;:])/u;
+const markdownStrikethrough = /~~(?=\S)[^\r\n]*?\S~~/u;
 const htmlTag = /<\/?[a-z][^>]*>/iu;
 
 const plainText = (min: number, max: number) =>
@@ -25,6 +31,17 @@ const plainText = (min: number, max: number) =>
     .refine(
       (value) => !markdownLink.test(value),
       "Markdown links are not allowed"
+    )
+    .refine(
+      (value) =>
+        !(
+          markdownCodeFence.test(value) ||
+          markdownInlineCode.test(value) ||
+          markdownStrong.test(value) ||
+          markdownEmphasis.test(value) ||
+          markdownStrikethrough.test(value)
+        ),
+      "Markdown decoration is not allowed"
     )
     .refine((value) => !htmlTag.test(value), "HTML tags are not allowed");
 

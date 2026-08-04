@@ -29,17 +29,12 @@ const logSuccess = (userId: string, draftId: string, action: string) => {
   logger.info("outreach_draft.update.succeeded", { userId, draftId, action });
 };
 
-const logFailure = (
-  userId: string,
-  draftId: string,
-  action: string,
-  error: unknown
-) => {
+const logFailure = (userId: string, draftId: string, action: string) => {
   logger.error("outreach_draft.update.failed", {
     userId,
     draftId,
     action,
-    error,
+    persistenceCode: "DATABASE_WRITE_FAILED",
   });
 };
 
@@ -72,8 +67,8 @@ export const updateOutreachDraft = async (
     logSuccess(userId, draftId, "update");
     revalidateDraftPaths(draftId);
     return { status: "success", message: "Draft saved." };
-  } catch (error) {
-    logFailure(userId, draftId, "update", error);
+  } catch {
+    logFailure(userId, draftId, "update");
     return { status: "error", message: "Unable to save outreach draft." };
   }
 };
@@ -104,8 +99,8 @@ export const resetOutreachDraft = async (
     logSuccess(userId, draftId, "reset");
     revalidateDraftPaths(draftId);
     return { status: "success", message: "Draft reset." };
-  } catch (error) {
-    logFailure(userId, draftId, "reset", error);
+  } catch {
+    logFailure(userId, draftId, "reset");
     return { status: "error", message: "Unable to save outreach draft." };
   }
 };

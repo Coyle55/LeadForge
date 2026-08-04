@@ -82,4 +82,31 @@ describe("validateOutreachOutput", () => {
       })
     ).toThrow();
   });
+
+  it("rejects fenced code, inline code, emphasis, and strikethrough decoration", () => {
+    for (const decoration of [
+      "```text\nA decorated block\n```",
+      "Use `this phrase` in the reply.",
+      "This is **important** for the contact path.",
+      "This is _important_ for the contact path.",
+      "This is ~~urgent~~ for the contact path.",
+    ]) {
+      expect(() =>
+        validateOutreachOutput({
+          ...valid,
+          body: `${valid.body}\n\n${decoration}`,
+        })
+      ).toThrow();
+    }
+  });
+
+  it("accepts ordinary email punctuation, URLs, addresses, and underscores", () => {
+    const body =
+      "Hi Jordan,\n\nRe: Acme's contact-flow follow-up — I noticed visitors may need an extra step. You can reach me at casey_smith@northstar.example or https://northstar.example/about. Is Tuesday (Aug. 11) useful?";
+
+    expect(validateOutreachOutput({ ...valid, body })).toEqual({
+      ...valid,
+      body,
+    });
+  });
 });
