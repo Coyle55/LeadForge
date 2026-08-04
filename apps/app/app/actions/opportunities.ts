@@ -72,7 +72,10 @@ export const analyzeAuditOpportunity = async (
     });
   } catch (error) {
     logger.error("opportunity.persistence.failed", { userId, auditId, error });
-    return { status: "error", message: "Unable to start opportunity analysis." };
+    return {
+      status: "error",
+      message: "Unable to start opportunity analysis.",
+    };
   }
   logger.info("opportunity.analysis.started", {
     userId,
@@ -149,7 +152,10 @@ export const analyzeAuditOpportunity = async (
         analysisId: analysis.id,
         error: persistenceError,
       });
-      return { status: "error", message: "Unable to save opportunity analysis." };
+      return {
+        status: "error",
+        message: "Unable to save opportunity analysis.",
+      };
     }
     logger.error("opportunity.analysis.failed", {
       userId,

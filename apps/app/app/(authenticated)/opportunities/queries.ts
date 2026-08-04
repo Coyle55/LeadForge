@@ -39,12 +39,16 @@ export const getOpportunities = async ({
     }),
     database.opportunityAnalysis.count({ where }),
   ]);
-  const prospectIds = [...new Set(analyses.map(({ prospectId }) => prospectId))];
+  const prospectIds = [
+    ...new Set(analyses.map(({ prospectId }) => prospectId)),
+  ];
   const prospects = await database.prospect.findMany({
     where: { userId, id: { in: prospectIds } },
     select: { id: true, businessName: true, websiteUrl: true },
   });
-  const prospectById = new Map(prospects.map((prospect) => [prospect.id, prospect]));
+  const prospectById = new Map(
+    prospects.map((prospect) => [prospect.id, prospect])
+  );
 
   return {
     analyses: analyses.map((analysis) => ({

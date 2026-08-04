@@ -29,6 +29,7 @@ const AuthenticatedLayout = async ({
             <Link href="/">Dashboard</Link>
             <Link href="/prospects">Prospects</Link>
             <Link href="/audits">Audits</Link>
+            <Link href="/opportunities">Opportunities</Link>
             <Link href="/settings">Settings</Link>
             <UserButton />
           </nav>

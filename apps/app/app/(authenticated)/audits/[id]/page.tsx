@@ -1,12 +1,16 @@
 import { auth } from "@repo/auth/server";
 import { Badge } from "@repo/design-system/components/ui/badge";
+import { Button } from "@repo/design-system/components/ui/button";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@repo/design-system/components/ui/card";
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AnalyzeButton } from "../../opportunities/analyze-button";
+import { getLatestAuditOpportunity } from "../../opportunities/queries";
 import { getAuditDetail } from "../queries";
 import { RunAuditButton } from "../run-audit-button";
 
@@ -32,6 +36,7 @@ const AuditDetailPage = async ({
   if (!audit) {
     notFound();
   }
+  const latestOpportunity = await getLatestAuditOpportunity(userId, id);
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       <div className="flex items-end justify-between gap-4">
@@ -77,6 +82,7 @@ const AuditDetailPage = async ({
                 {checks.map((check) => (
                   <div
                     className="grid gap-2 py-4 md:grid-cols-[auto_1fr]"
+                    id={check.key}
                     key={check.id}
                   >
                     <Badge
@@ -109,9 +115,21 @@ const AuditDetailPage = async ({
           ) : null;
         })
       )}
-      {audit.prospect ? (
-        <RunAuditButton prospectId={audit.prospect.id} rerun />
-      ) : null}
+      <div className="flex flex-wrap items-start gap-3 border-t pt-6">
+        {audit.prospect ? (
+          <RunAuditButton prospectId={audit.prospect.id} rerun />
+        ) : null}
+        {audit.status === "COMPLETED" ? (
+          <AnalyzeButton auditId={audit.id} />
+        ) : null}
+        {latestOpportunity ? (
+          <Button asChild variant="outline">
+            <Link href={`/opportunities/${latestOpportunity.id}`}>
+              View latest analysis
+            </Link>
+          </Button>
+        ) : null}
+      </div>
     </div>
   );
 };

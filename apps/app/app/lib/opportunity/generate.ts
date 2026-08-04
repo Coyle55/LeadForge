@@ -1,8 +1,16 @@
 import { generateText, Output } from "ai";
-import { opportunityOutputSchema, validateOpportunityOutput } from "./schema";
 import { OPPORTUNITY_SYSTEM_PROMPT } from "./prompt";
+import { opportunityOutputSchema, validateOpportunityOutput } from "./schema";
 
-export type OpportunityGenerationFailure = "RATE_LIMITED" | "TIMEOUT" | "GATEWAY_ERROR" | "INVALID_OUTPUT";
+const timeoutPattern = /timeout|abort/i;
+const invalidOutputPattern =
+  /unknown audit evidence|duplicate recommendation|zod|validation/i;
+
+export type OpportunityGenerationFailure =
+  | "RATE_LIMITED"
+  | "TIMEOUT"
+  | "GATEWAY_ERROR"
+  | "INVALID_OUTPUT";
 
 export class OpportunityGenerationError extends Error {
   readonly code: OpportunityGenerationFailure;
@@ -27,7 +35,9 @@ export const generateOpportunity = async (
   const now = options.now ?? Date.now;
   const started = now();
   try {
-    const result = await (options.generate ?? (generateText as unknown as Generator))({
+    const result = await (
+      options.generate ?? (generateText as unknown as Generator)
+    )({
       model: options.model,
       output: Output.object({ schema: opportunityOutputSchema }),
       system: OPPORTUNITY_SYSTEM_PROMPT,
@@ -37,7 +47,10 @@ export const generateOpportunity = async (
       timeout: 30_000,
       telemetry: { recordInputs: false, recordOutputs: false },
     });
-    const output = validateOpportunityOutput(result.output, new Set(input.checks.map(({ key }) => key)));
+    const output = validateOpportunityOutput(
+      result.output,
+      new Set(input.checks.map(({ key }) => key))
+    );
     return {
       output,
       inputTokens: result.usage.inputTokens,
@@ -45,14 +58,27 @@ export const generateOpportunity = async (
       durationMs: now() - started,
     };
   } catch (error) {
-    if (error instanceof OpportunityGenerationError) throw error;
-    if (typeof error === "object" && error && "statusCode" in error && error.statusCode === 429) {
+    if (error instanceof OpportunityGenerationError) {
+      throw error;
+    }
+    if (
+      typeof error === "object" &&
+      error &&
+      "statusCode" in error &&
+      error.statusCode === 429
+    ) {
       throw new OpportunityGenerationError("RATE_LIMITED");
     }
-    if (error instanceof Error && /timeout|abort/i.test(`${error.name} ${error.message}`)) {
+    if (
+      error instanceof Error &&
+      timeoutPattern.test(`${error.name} ${error.message}`)
+    ) {
       throw new OpportunityGenerationError("TIMEOUT");
     }
-    if (error instanceof Error && /unknown audit evidence|duplicate recommendation|zod|validation/i.test(`${error.name} ${error.message}`)) {
+    if (
+      error instanceof Error &&
+      invalidOutputPattern.test(`${error.name} ${error.message}`)
+    ) {
       throw new OpportunityGenerationError("INVALID_OUTPUT");
     }
     throw new OpportunityGenerationError("GATEWAY_ERROR");
