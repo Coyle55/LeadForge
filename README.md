@@ -1,6 +1,6 @@
 # LeadForge
 
-LeadForge is a private, single-owner lead workspace. M0 established Clerk authentication, a PostgreSQL-backed user profile, and a Clerk user-ID allowlist. M1 adds manual prospect creation, search, editing, archiving, and restoration without adding discovery providers or backend services.
+LeadForge is a private, single-owner lead workspace. M0 established authentication and persistence, M1 added manual prospect management, M2 added deterministic website audits, and M3 turns completed audit evidence into AI-generated opportunity scoring and recommendations.
 
 ## Requirements
 
@@ -40,6 +40,8 @@ The authenticated application routes are:
 - `/prospects/[id]` — edit, archive, or restore an owned prospect
 - `/audits` — owner-scoped website audit history
 - `/audits/[id]` — grouped audit evidence and rerun controls
+- `/opportunities` — completed and failed opportunity-analysis history
+- `/opportunities/[id]` — evidence-linked score and recommendations
 - `/settings` — update the owner's display name
 
 ## Commands
@@ -77,7 +79,8 @@ These steps require the repository owner's credentials and are intentionally not
 1. Import this Git repository as one Vercel project.
 2. Set Root Directory to `apps/app` and retain access to source files outside the root so workspace packages build.
 3. Add `DATABASE_URL`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in`, `NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up`, `NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL=/`, `NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL=/`, `NEXT_PUBLIC_APP_URL`, and `ALLOWED_USER_IDS` for Production and Preview as appropriate.
-4. Deploy once the production migration has been applied.
+4. For M3 analysis, enable AI Gateway for the project and add `AI_GATEWAY_MODEL` using a model ID currently available to that Gateway. For local development outside Vercel, create an AI Gateway API key and add it as `AI_GATEWAY_API_KEY`; Vercel deployments may use the platform's Gateway authentication.
+5. Deploy once the production migration has been applied.
 
 ## M0 acceptance flow
 
@@ -122,3 +125,29 @@ No new environment variables or external accounts are required. M2 deliberately 
 - All audit reads and writes remain scoped to the authenticated Clerk owner ID.
 
 Synchronous execution is capped at five pages, five redirects per request, two megabytes per response, five seconds per request, and twenty seconds for the run. Larger browser-based or asynchronous audits are deferred.
+
+## M3 opportunity scoring
+
+M3 adds a manual **Analyze opportunity** action to completed audits. It sends only minimized audit evidence through the Vercel AI Gateway and persists an immutable assessment: an overall 0–100 opportunity score, accessibility/trust/SEO/technical/performance scores, rationale, and three to seven prioritized recommendations linked back to source checks. Higher scores mean more addressable sales opportunity—not better website quality.
+
+Set these values locally in `apps/app/.env.local` and in the Vercel project when enabling analysis:
+
+```bash
+AI_GATEWAY_MODEL=provider/current-model-id
+AI_GATEWAY_API_KEY=replace_for_local_development
+```
+
+There is intentionally no built-in model default. Choose a model enabled for your Gateway and keep the value configurable. Without these credentials, prospect management and deterministic audits continue to work; the analysis action returns a safe configuration error.
+
+### M3 acceptance flow
+
+- Open a completed audit and select **Analyze opportunity**.
+- A valid structured response redirects to `/opportunities/[id]` and persists across refresh.
+- The detail page shows the overall score, all five category scores, rationale, and three to seven ordered recommendations.
+- Recommendation evidence links return to the exact source audit checks.
+- Failed, timed-out, rate-limited, or invalid responses create a failed attempt without a fabricated score.
+- `/opportunities` lists owner-scoped completed or failed attempts newest first.
+- Logs record identifiers, model, prompt version, duration, token counts, and safe failure classifications without prompt or generated content.
+- `bun run check`, `bun run test`, `bun run build`, and `bun run migrate:deploy` pass.
+
+M3 remains synchronous and manually initiated. Outreach, autonomous execution, QStash, webhooks, callbacks, screenshots, storage, tasks, deals, analytics, and separate backend services remain deferred.
