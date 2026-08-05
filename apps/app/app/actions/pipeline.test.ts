@@ -9,6 +9,7 @@ const dealCreateMock = vi.fn();
 const dealUpdateManyMock = vi.fn();
 const taskCreateMock = vi.fn();
 const taskUpdateManyMock = vi.fn();
+const stageChangeCreateMock = vi.fn();
 const logInfoMock = vi.fn();
 const logErrorMock = vi.fn();
 const revalidatePathMock = vi.fn();
@@ -19,6 +20,7 @@ const transaction = {
     findFirst: dealFindFirstMock,
     updateMany: dealUpdateManyMock,
   },
+  pipelineStageChange: { create: stageChangeCreateMock },
   prospect: {
     findFirst: prospectFindFirstMock,
     updateMany: prospectUpdateManyMock,
@@ -313,6 +315,30 @@ describe("pipeline and Deal actions", () => {
     expect(dealCreateMock).not.toHaveBeenCalled();
     expect(dealUpdateManyMock).not.toHaveBeenCalled();
     expect(prospectUpdateManyMock).toHaveBeenCalledOnce();
+  });
+
+  it("records the stage transition atomically with the move", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    prospectFindFirstMock.mockResolvedValue({
+      id: "prospect_1",
+      pipelineStage: "PROPOSAL",
+    });
+    dealFindFirstMock.mockResolvedValue(null);
+    const { moveProspectStage } = await import("./pipeline");
+
+    await moveProspectStage(
+      {},
+      form({ destination: "INTERESTED", prospectId: "prospect_1" })
+    );
+
+    expect(stageChangeCreateMock).toHaveBeenCalledWith({
+      data: {
+        userId: "user_owner",
+        prospectId: "prospect_1",
+        fromStage: "PROPOSAL",
+        toStage: "INTERESTED",
+      },
+    });
   });
 
   it("returns one not-found result for missing, archived, or cross-owner prospects", async () => {

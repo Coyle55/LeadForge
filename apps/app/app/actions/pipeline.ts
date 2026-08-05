@@ -281,6 +281,15 @@ const executeMoveTransaction = async ({
         throw new MutationRaceError();
       }
 
+      await transaction.pipelineStageChange.create({
+        data: {
+          userId,
+          prospectId: prospect.id,
+          fromStage: prospect.pipelineStage,
+          toStage: transition.destination,
+        },
+      });
+
       return "success" as const;
     },
     { isolationLevel: "Serializable" }
