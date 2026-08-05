@@ -65,9 +65,9 @@ model Deal {
 }
 
 enum TaskPriority {
-  LOW
-  MEDIUM
   HIGH
+  MEDIUM
+  LOW
 }
 
 enum TaskStatus {
