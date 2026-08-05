@@ -149,8 +149,11 @@ const TasksPage = async ({
           ) : null}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border bg-card shadow-xs">
-          <Table>
+        <section
+          aria-label="Task results; scroll horizontally for all columns"
+          className="overflow-x-auto rounded-xl border bg-card shadow-xs [&_[data-slot=table-container]]:overflow-visible"
+        >
+          <Table className="min-w-[52rem]">
             <TableHeader>
               <TableRow className="bg-muted/30 hover:bg-muted/30">
                 <TableHead>Task</TableHead>
@@ -209,6 +212,7 @@ const TasksPage = async ({
                         <TaskStatusButton
                           status={task.status}
                           taskId={task.id}
+                          taskTitle={task.title}
                         />
                       </div>
                     </TableCell>
@@ -217,7 +221,7 @@ const TasksPage = async ({
               })}
             </TableBody>
           </Table>
-        </div>
+        </section>
       )}
 
       {pageCount > 1 || input.page > 1 ? (

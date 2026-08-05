@@ -260,7 +260,11 @@ const ActivePipelineDeal = ({
         )}
       </div>
       <aside className="rounded-lg border bg-muted/20 p-3">
-        <MoveStageForm currentStage={stage} prospectId={prospectId} />
+        <MoveStageForm
+          currentStage={stage}
+          key={stage}
+          prospectId={prospectId}
+        />
       </aside>
     </div>
   );

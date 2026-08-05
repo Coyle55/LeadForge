@@ -57,12 +57,19 @@ const TaskItem = ({ archived, task }: { archived: boolean; task: Task }) => (
         ) : null}
       </div>
       {archived ? null : (
-        <TaskStatusButton status={task.status} taskId={task.id} />
+        <TaskStatusButton
+          status={task.status}
+          taskId={task.id}
+          taskTitle={task.title}
+        />
       )}
     </div>
     {archived ? null : (
       <details className="mt-3 border-t pt-3">
-        <summary className="w-fit cursor-pointer text-muted-foreground text-xs outline-none hover:text-foreground focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring">
+        <summary
+          aria-label={`Edit task: ${task.title}`}
+          className="w-fit cursor-pointer text-muted-foreground text-xs outline-none hover:text-foreground focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring"
+        >
           Edit task
         </summary>
         <div className="mt-4 rounded-lg bg-muted/25 p-4">

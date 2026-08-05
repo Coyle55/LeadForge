@@ -16,9 +16,11 @@ import {
 export const TaskStatusButton = ({
   status,
   taskId,
+  taskTitle,
 }: {
   status: "COMPLETED" | "OPEN";
   taskId: string;
+  taskTitle: string;
 }) => {
   const router = useRouter();
   const [result, setResult] = useState<TaskActionResult | null>(null);
@@ -43,6 +45,7 @@ export const TaskStatusButton = ({
   return (
     <div aria-busy={pending} className="flex flex-col items-start gap-1.5">
       <Button
+        aria-label={`${control.label} task: ${taskTitle}`}
         disabled={pending}
         onClick={run}
         size="sm"
