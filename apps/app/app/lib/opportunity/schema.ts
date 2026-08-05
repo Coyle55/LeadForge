@@ -1,55 +1,66 @@
 import { z } from "zod";
-import type { OpportunityOutput } from "./types";
+import type { InterpretationOutput } from "./types";
 
-const score = z.number().int().min(0).max(100);
-const recommendation = z.object({
+const recommendationCopySchema = z.object({
+  serviceCategory: z.enum([
+    "WEBSITE_REDESIGN",
+    "PERFORMANCE_OPTIMIZATION",
+    "BOOKING_INTEGRATION",
+    "LEAD_CAPTURE_REPAIR",
+    "LEAD_RESPONSE_AUTOMATION",
+  ]),
   title: z.string().min(5).max(120),
-  impact: z.enum(["HIGH", "MEDIUM", "LOW"]),
-  effort: z.enum(["HIGH", "MEDIUM", "LOW"]),
-  rationale: z.string().min(20).max(800),
-  action: z.string().min(20).max(800),
-  auditCheckKeys: z
-    .array(z.string().min(1))
-    .min(1)
-    .max(5)
-    .refine((keys) => new Set(keys).size === keys.length),
+  rationale: z.string().min(20).max(500),
+  action: z.string().min(20).max(500),
 });
 
-export const opportunityOutputSchema = z
+export const interpretationOutputSchema = z
   .object({
-    overallScore: score,
-    categoryScores: z
-      .object({
-        accessibility: score,
-        trust: score,
-        seo: score,
-        technical: score,
-        performance: score,
-      })
-      .strict(),
-    executiveSummary: z.string().min(40).max(700),
-    overallRationale: z.string().min(40).max(1000),
-    recommendations: z.array(recommendation).min(3).max(7),
+    summary: z.string().min(40).max(700),
+    strongestIssue: z.string().min(10).max(200),
+    practicalImpact: z.string().min(20).max(500),
+    suggestedOffer: z.string().min(10).max(300),
+    confidence: z.enum(["HIGH", "MEDIUM", "LOW"]),
+    warnings: z.array(z.string().min(5).max(300)).max(5),
+    recommendations: z.array(recommendationCopySchema).max(2),
   })
   .strict();
 
-export const validateOpportunityOutput = (
+const numberPattern = /-?\d+(\.\d+)?%?/g;
+
+export const validateInterpretationOutput = (
   output: unknown,
-  validCheckKeys: Set<string>
-): OpportunityOutput => {
-  const parsed = opportunityOutputSchema.parse(output);
-  const titles = parsed.recommendations.map(({ title }) =>
-    title.trim().toLowerCase()
-  );
-  if (new Set(titles).size !== titles.length) {
-    throw new Error("Duplicate recommendation title");
+  allowedNumbers: Set<string>,
+  expectedServiceCategories: string[]
+): InterpretationOutput => {
+  const parsed = interpretationOutputSchema.parse(output);
+
+  const returned = parsed.recommendations.map((r) => r.serviceCategory);
+  const returnedSet = new Set<string>(returned);
+  const expectedSet = new Set(expectedServiceCategories);
+  const isExactMatch =
+    returnedSet.size === returned.length &&
+    returnedSet.size === expectedSet.size &&
+    [...expectedSet].every((category) => returnedSet.has(category));
+  if (!isExactMatch) {
+    throw new Error(
+      "Interpretation recommendations do not match the expected service categories"
+    );
   }
-  if (
-    parsed.recommendations.some(({ auditCheckKeys }) =>
-      auditCheckKeys.some((key) => !validCheckKeys.has(key))
-    )
-  ) {
-    throw new Error("Unknown audit evidence reference");
+
+  const text = [
+    parsed.summary,
+    parsed.strongestIssue,
+    parsed.practicalImpact,
+    parsed.suggestedOffer,
+    ...parsed.recommendations.flatMap((r) => [r.title, r.rationale, r.action]),
+  ].join(" ");
+  const found = text.match(numberPattern) ?? [];
+  for (const value of found) {
+    const normalized = value.replace(/%$/, "");
+    if (!(allowedNumbers.has(value) || allowedNumbers.has(normalized))) {
+      throw new Error(`Interpretation introduced an unlisted number: ${value}`);
+    }
   }
   return parsed;
 };
