@@ -1,7 +1,14 @@
 import { z } from "zod";
 
+export {
+  type DealEditInput,
+  dealEditSchema,
+  type PipelineTransitionInput,
+  pipelineTransitionSchema,
+} from "./pipeline";
 export { type ProspectInput, prospectSchema } from "./prospect";
 export { type SettingsInput, settingsSchema } from "./settings";
+export { type TaskInput, taskInputSchema } from "./tasks";
 
 const unsupportedControlCharacters =
   // biome-ignore lint/suspicious/noControlCharactersInRegex: This intentionally rejects every C0 control character except tab and newline.

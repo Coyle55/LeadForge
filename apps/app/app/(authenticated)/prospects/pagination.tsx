@@ -2,10 +2,16 @@ import { Button } from "@repo/design-system/components/ui/button";
 import Link from "next/link";
 import type { ProspectListInput } from "./queries";
 
-const pageHref = (page: number, { search, status }: ProspectListInput) => {
+const pageHref = (
+  page: number,
+  { search, stage, status }: ProspectListInput
+) => {
   const params = new URLSearchParams({ page: String(page), status });
   if (search) {
     params.set("search", search);
+  }
+  if (stage) {
+    params.set("stage", stage);
   }
   return `/prospects?${params.toString()}`;
 };
