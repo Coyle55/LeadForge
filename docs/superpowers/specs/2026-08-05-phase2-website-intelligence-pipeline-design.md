@@ -110,7 +110,7 @@ A weighted mapping table in `apps/app/app/lib/opportunity/recommendation-rules.t
 | contact_path FAIL | 2 | Lead-capture repair |
 | phone_detection FAIL | 2 | Lead-capture repair |
 | email_detection FAIL | 1 | Lead-capture repair |
-| booking_detection FAIL and (phone_detection FAIL or email_detection FAIL) | 2 | Lead-response automation |
+| booking_detection FAIL and (phone_detection FAIL or email_detection FAIL) | 3 | Lead-response automation |
 
 Weights sum per service; services scoring ≥3 are kept, sorted descending, capped at the top 2. If nothing clears the threshold but at least one signal fired, the single highest-weighted service is kept — never zero recommendations when real problems exist, and genuinely healthy sites get none. `effort` is a fixed lookup per service (redesign=HIGH, performance=MEDIUM, booking=MEDIUM, lead-capture=LOW, lead-response=MEDIUM); `impact` derives from the service's total weight. `confidence` is derived from the same total weight: ≥6 HIGH, 4–5 MEDIUM, 3 LOW.
 

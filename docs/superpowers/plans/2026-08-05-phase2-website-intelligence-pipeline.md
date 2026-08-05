@@ -599,11 +599,20 @@ export const SIGNAL_RULES: SignalRule[] = [
   { checkKey: "email_detection", service: "LEAD_CAPTURE_REPAIR", statuses: { FAIL: 1 } },
 ];
 
+// Weight is 3 (not 2) so this signal independently clears
+// RECOMMENDATION_THRESHOLD on its own. At weight 2 it can never appear in
+// the final selection whenever booking_detection FAIL also fires the plain
+// BOOKING_INTEGRATION signal (weight 3) in the same input, because that
+// service alone already satisfies the threshold and the "qualifying"
+// early-return in selectRecommendations never falls through to consider a
+// sub-threshold candidate — so the two service categories most likely to
+// co-occur (this one always requires booking_detection FAIL as its gate)
+// would otherwise be structurally unable to appear together.
 export const AFTER_HOURS_COMBINATION = {
   gate: ["booking_detection"],
   either: ["phone_detection", "email_detection"],
   service: "LEAD_RESPONSE_AUTOMATION" as ServiceCategory,
-  weight: 2,
+  weight: 3,
 };
 ```
 
