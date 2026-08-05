@@ -27,6 +27,7 @@ export const interpretationOutputSchema = z
   .strict();
 
 const numberPattern = /-?\d+(\.\d+)?%?/g;
+const trailingPercentPattern = /%$/;
 
 export const validateInterpretationOutput = (
   output: unknown,
@@ -57,7 +58,7 @@ export const validateInterpretationOutput = (
   ].join(" ");
   const found = text.match(numberPattern) ?? [];
   for (const value of found) {
-    const normalized = value.replace(/%$/, "");
+    const normalized = value.replace(trailingPercentPattern, "");
     if (!(allowedNumbers.has(value) || allowedNumbers.has(normalized))) {
       throw new Error(`Interpretation introduced an unlisted number: ${value}`);
     }

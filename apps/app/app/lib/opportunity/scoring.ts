@@ -7,6 +7,7 @@ import {
   getCategoryCap,
   NEGATIVE_MODIFIERS,
   POINT_TABLE,
+  type PointRule,
 } from "./scoring-rules";
 
 export type Tier = "EXCELLENT" | "HIGH" | "MEDIUM" | "LOW";
@@ -69,6 +70,120 @@ const detectDisqualifiers = (input: ScoringInput): Disqualifier[] => {
   return disqualifiers;
 };
 
+// Resolves the raw point value for a single check from its POINT_TABLE
+// rule, then applies the appointment-driven booking multiplier when
+// applicable. Written as a plain if/else chain (matching the status
+// branching style used in packages/audit-engine/checks.ts) rather than a
+// nested ternary.
+const pointsForCheck = (
+  check: ScoringCheckInput,
+  rule: PointRule,
+  isAppointmentDriven: boolean
+): number => {
+  let points: number;
+  if (check.status === "FAIL") {
+    points = rule.fail ?? 0;
+  } else if (check.status === "WARNING") {
+    points = rule.warning ?? 0;
+  } else {
+    points = 0;
+  }
+  if (
+    points !== 0 &&
+    check.key === "booking_detection" &&
+    isAppointmentDriven
+  ) {
+    points *= BOOKING_WEIGHT_MULTIPLIER;
+  }
+  return points;
+};
+
+interface CheckPointAccumulation {
+  breakdown: ScoringBreakdownEntry[];
+  rawByCategory: Record<string, number>;
+  topReasons: TopReason[];
+}
+
+// Walks every audit check, resolves its point value, and accumulates the
+// per-category raw totals plus the breakdown/topReasons rows used later
+// in the result. Skips checks with no scoring rule or a zero point value.
+const accumulateCheckPoints = (
+  checks: ScoringCheckInput[],
+  isAppointmentDriven: boolean
+): CheckPointAccumulation => {
+  const breakdown: ScoringBreakdownEntry[] = [];
+  const topReasons: TopReason[] = [];
+  const rawByCategory: Record<string, number> = {};
+
+  for (const check of checks) {
+    const rule = POINT_TABLE[check.key];
+    if (!rule) {
+      continue;
+    }
+    const points = pointsForCheck(check, rule, isAppointmentDriven);
+    if (points === 0) {
+      continue;
+    }
+    rawByCategory[check.category] =
+      (rawByCategory[check.category] ?? 0) + points;
+    breakdown.push({ checkKey: check.key, category: check.category, points });
+    topReasons.push({
+      checkKey: check.key,
+      category: check.category,
+      points,
+      evidence: check.evidence,
+    });
+  }
+
+  return { breakdown, rawByCategory, topReasons };
+};
+
+// Applies each configured negative modifier (e.g. penalizing a category
+// when an unrelated check passed in a way that undercuts it) directly
+// against the mutable raw-category totals, floored at zero.
+const applyNegativeModifiers = (
+  rawByCategory: Record<string, number>,
+  byKey: Map<string, { evidence: unknown; status: CheckStatus }>
+): void => {
+  for (const modifier of NEGATIVE_MODIFIERS) {
+    if (modifier.matches(byKey)) {
+      rawByCategory[modifier.category] = Math.max(
+        0,
+        (rawByCategory[modifier.category] ?? 0) - modifier.points
+      );
+    }
+  }
+};
+
+interface CategoryScoreAssembly {
+  categoryScores: Record<string, number>;
+  overallScore: number;
+}
+
+// Converts the raw per-category totals into the 0-100 categoryScores map
+// and the capped, rounded overall score.
+const buildCategoryScoreAssembly = (
+  rawByCategory: Record<string, number>,
+  isAppointmentDriven: boolean
+): CategoryScoreAssembly => {
+  const categoryScores: Record<string, number> = {};
+  let overallScore = 0;
+  for (const category of Object.keys(CATEGORY_CAPS)) {
+    const raw = rawByCategory[category] ?? 0;
+    const maxPossible = CATEGORY_MAX_POSSIBLE[category] ?? 1;
+    categoryScores[category.toLowerCase()] = Math.min(
+      100,
+      Math.round((raw / maxPossible) * 100)
+    );
+    overallScore += Math.min(
+      raw,
+      getCategoryCap(category, isAppointmentDriven)
+    );
+  }
+  overallScore = Math.min(100, Math.round(overallScore));
+  return { categoryScores, overallScore };
+};
+
 export const computeOpportunityScore = (input: ScoringInput): ScoringResult => {
   const disqualifiers = detectDisqualifiers(input);
   if (disqualifiers.length > 0) {
@@ -89,62 +204,17 @@ export const computeOpportunityScore = (input: ScoringInput): ScoringResult => {
     input.businessCategory !== null &&
     APPOINTMENT_DRIVEN_CATEGORIES.has(input.businessCategory);
 
-  const breakdown: ScoringBreakdownEntry[] = [];
-  const topReasons: TopReason[] = [];
-  const rawByCategory: Record<string, number> = {};
+  const { breakdown, rawByCategory, topReasons } = accumulateCheckPoints(
+    input.checks,
+    isAppointmentDriven
+  );
 
-  for (const check of input.checks) {
-    const rule = POINT_TABLE[check.key];
-    if (!rule) {
-      continue;
-    }
-    let points =
-      check.status === "FAIL"
-        ? (rule.fail ?? 0)
-        : check.status === "WARNING"
-          ? (rule.warning ?? 0)
-          : 0;
-    if (points === 0) {
-      continue;
-    }
-    if (check.key === "booking_detection" && isAppointmentDriven) {
-      points *= BOOKING_WEIGHT_MULTIPLIER;
-    }
-    rawByCategory[check.category] =
-      (rawByCategory[check.category] ?? 0) + points;
-    breakdown.push({ checkKey: check.key, category: check.category, points });
-    topReasons.push({
-      checkKey: check.key,
-      category: check.category,
-      points,
-      evidence: check.evidence,
-    });
-  }
+  applyNegativeModifiers(rawByCategory, byKey);
 
-  for (const modifier of NEGATIVE_MODIFIERS) {
-    if (modifier.matches(byKey)) {
-      rawByCategory[modifier.category] = Math.max(
-        0,
-        (rawByCategory[modifier.category] ?? 0) - modifier.points
-      );
-    }
-  }
-
-  const categoryScores: Record<string, number> = {};
-  let overallScore = 0;
-  for (const category of Object.keys(CATEGORY_CAPS)) {
-    const raw = rawByCategory[category] ?? 0;
-    const maxPossible = CATEGORY_MAX_POSSIBLE[category] ?? 1;
-    categoryScores[category.toLowerCase()] = Math.min(
-      100,
-      Math.round((raw / maxPossible) * 100)
-    );
-    overallScore += Math.min(
-      raw,
-      getCategoryCap(category, isAppointmentDriven)
-    );
-  }
-  overallScore = Math.min(100, Math.round(overallScore));
+  const { categoryScores, overallScore } = buildCategoryScoreAssembly(
+    rawByCategory,
+    isAppointmentDriven
+  );
 
   topReasons.sort((a, b) => b.points - a.points);
 

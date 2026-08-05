@@ -16,6 +16,8 @@ const allowedNumbers = new Set([
   "5",
 ]);
 const expectedServiceCategories = ["LEAD_CAPTURE_REPAIR"];
+const UNLISTED_NUMBER_ERROR = /unlisted number/i;
+const EXPECTED_SERVICE_CATEGORIES_ERROR = /expected service categories/i;
 
 const valid = {
   summary:
@@ -70,7 +72,7 @@ describe("validateInterpretationOutput", () => {
         allowedNumbers,
         expectedServiceCategories
       )
-    ).toThrow(/unlisted number/i);
+    ).toThrow(UNLISTED_NUMBER_ERROR);
   });
 
   it("rejects a number invented inside recommendation copy, not just the overall-summary fields", () => {
@@ -89,7 +91,7 @@ describe("validateInterpretationOutput", () => {
         allowedNumbers,
         expectedServiceCategories
       )
-    ).toThrow(/unlisted number/i);
+    ).toThrow(UNLISTED_NUMBER_ERROR);
   });
 
   it("accepts a percent-suffixed number when its bare form is allowed", () => {
@@ -113,7 +115,7 @@ describe("validateInterpretationOutput", () => {
         allowedNumbers,
         expectedServiceCategories
       )
-    ).toThrow(/expected service categories/i);
+    ).toThrow(EXPECTED_SERVICE_CATEGORIES_ERROR);
   });
 
   it("rejects recommendations that include an extra, unexpected service category", () => {
@@ -136,7 +138,7 @@ describe("validateInterpretationOutput", () => {
         allowedNumbers,
         expectedServiceCategories
       )
-    ).toThrow(/expected service categories/i);
+    ).toThrow(EXPECTED_SERVICE_CATEGORIES_ERROR);
   });
 
   it("rejects a recommendation whose service category is wrong even though the count matches", () => {
@@ -155,7 +157,7 @@ describe("validateInterpretationOutput", () => {
         allowedNumbers,
         expectedServiceCategories
       )
-    ).toThrow(/expected service categories/i);
+    ).toThrow(EXPECTED_SERVICE_CATEGORIES_ERROR);
   });
 
   it("rejects a duplicated service category even when the expected set would otherwise match", () => {
@@ -169,7 +171,7 @@ describe("validateInterpretationOutput", () => {
         allowedNumbers,
         expectedServiceCategories
       )
-    ).toThrow(/expected service categories/i);
+    ).toThrow(EXPECTED_SERVICE_CATEGORIES_ERROR);
   });
 
   it("accepts zero recommendations when zero are expected", () => {

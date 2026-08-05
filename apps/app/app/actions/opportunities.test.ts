@@ -148,7 +148,7 @@ describe("analyzeAuditOpportunity", () => {
     });
     analysisCreateMock.mockResolvedValue({ id: "analysis_1" });
     generateMock.mockResolvedValue(generated);
-    transactionMock.mockImplementation(async (ops: Array<Promise<unknown>>) =>
+    transactionMock.mockImplementation(async (ops: Promise<unknown>[]) =>
       Promise.all(ops)
     );
     const { analyzeAuditOpportunity } = await import("./opportunities");

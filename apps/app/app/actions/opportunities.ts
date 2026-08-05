@@ -13,8 +13,14 @@ import {
   InterpretationGenerationError,
 } from "../lib/opportunity/generate";
 import { INTERPRETATION_PROMPT_VERSION } from "../lib/opportunity/prompt";
-import { selectRecommendations } from "../lib/opportunity/recommend";
-import { computeOpportunityScore } from "../lib/opportunity/scoring";
+import {
+  type RecommendationCandidate,
+  selectRecommendations,
+} from "../lib/opportunity/recommend";
+import {
+  computeOpportunityScore,
+  type ScoringResult,
+} from "../lib/opportunity/scoring";
 
 // ScoringBreakdownEntry[]/TopReason[] are plain, JSON-serializable arrays
 // (numbers/strings plus AuditCheck.evidence, which is already a Prisma
@@ -32,30 +38,173 @@ const failureMessages: Record<string, string> = {
   INTERNAL_ERROR: "The opportunity analysis could not be completed.",
 };
 
-export const analyzeAuditOpportunity = async (
-  auditId: string
+// Persists a disqualified analysis (e.g. incomplete audit, unreachable
+// site) as COMPLETED with a zero score and no recommendations, and logs
+// the outcome. Extracted from analyzeAuditOpportunity to keep the
+// disqualified branch's persistence + logging together as one step.
+const persistDisqualifiedAnalysis = async (
+  scoringResult: ScoringResult,
+  context: { userId: string; auditId: string; analysisId: string }
+): Promise<void> => {
+  await database.opportunityAnalysis.update({
+    where: { id: context.analysisId },
+    data: {
+      status: "COMPLETED",
+      scoringMethod: "DETERMINISTIC",
+      tier: scoringResult.tier,
+      overallScore: 0,
+      categoryScores: scoringResult.categoryScores,
+      scoringBreakdown: asJson(scoringResult.scoringBreakdown),
+      topReasons: asJson(scoringResult.topReasons),
+      disqualifiers: scoringResult.disqualifiers,
+      completedAt: new Date(),
+    },
+  });
+  logger.info("opportunity.analysis.disqualified", {
+    userId: context.userId,
+    auditId: context.auditId,
+    analysisId: context.analysisId,
+    disqualifiers: scoringResult.disqualifiers,
+  });
+};
+
+// Builds the opportunityRecommendation row data for the success path,
+// matching each selected candidate to the AI-generated copy for its
+// service category. Pure and side-effect free; the caller performs the
+// actual createMany within a transaction.
+const buildRecommendationRows = (
+  analysisId: string,
+  recommendations: RecommendationCandidate[],
+  generated: Awaited<ReturnType<typeof generateInterpretation>>
+) => {
+  const copyByCategory = new Map(
+    generated.output.recommendations.map((copy) => [copy.serviceCategory, copy])
+  );
+  return recommendations.map((candidate, position) => {
+    const copy = copyByCategory.get(candidate.serviceCategory);
+    if (!copy) {
+      // validateInterpretationOutput's set-equality check already
+      // guarantees this can't happen; this is a defensive guard.
+      throw new Error(
+        "Missing interpretation copy for a selected service category"
+      );
+    }
+    return {
+      analysisId,
+      position,
+      title: copy.title,
+      rationale: copy.rationale,
+      action: copy.action,
+      impact: candidate.impact,
+      effort: candidate.effort,
+      serviceCategory: candidate.serviceCategory,
+      confidence: candidate.confidence,
+      auditCheckKeys: candidate.supportingCheckKeys,
+    };
+  });
+};
+
+const resolveFailureCode = (error: unknown): string => {
+  const rawCode =
+    typeof error === "object" && error && "code" in error
+      ? String(error.code)
+      : "INTERNAL_ERROR";
+  return rawCode in failureMessages ? rawCode : "INTERNAL_ERROR";
+};
+
+// Persists a FAILED analysis row after an unexpected error and logs the
+// outcome. Returns an error result only when persisting the failure
+// itself also fails (the caller returns early in that case); otherwise
+// returns undefined so the caller continues to its normal redirect.
+const persistAnalysisFailure = async (
+  error: unknown,
+  context: {
+    userId: string;
+    auditId: string;
+    analysisId: string;
+    model: string;
+  }
 ): Promise<{ status: "error"; message: string } | undefined> => {
+  const failureCode = resolveFailureCode(error);
+  try {
+    await database.opportunityAnalysis.update({
+      where: { id: context.analysisId },
+      data: {
+        status: "FAILED",
+        overallScore: null,
+        executiveSummary: null,
+        overallRationale: null,
+        failureCode,
+        failureMessage: failureMessages[failureCode],
+        completedAt: new Date(),
+      },
+    });
+  } catch (persistenceError) {
+    logger.error("opportunity.persistence.failed", {
+      userId: context.userId,
+      auditId: context.auditId,
+      analysisId: context.analysisId,
+      error: persistenceError,
+    });
+    return {
+      status: "error",
+      message: "Unable to save opportunity analysis.",
+    };
+  }
+  logger.error("opportunity.analysis.failed", {
+    userId: context.userId,
+    auditId: context.auditId,
+    analysisId: context.analysisId,
+    model: context.model,
+    failureCode,
+    error,
+  });
+  return undefined;
+};
+
+// Resolves and validates everything analyzeAuditOpportunity needs before it
+// can start an analysis: auth/authorization, the completed audit, the
+// configured model, and the associated prospect. Also redirects (via a
+// thrown NEXT_REDIRECT, same as the original inline check) to an existing
+// in-flight analysis instead of starting a duplicate. Returns an error
+// result on any failed check so the caller can return it unchanged.
+const resolveAnalysisContext = async (auditId: string) => {
   const { userId } = await auth();
   if (!(userId && isAllowedUserId(userId))) {
-    return { status: "error", message: "Not authorized." };
+    return { error: { status: "error" as const, message: "Not authorized." } };
   }
   const audit = await database.websiteAudit.findFirst({
     where: { id: auditId, userId, status: "COMPLETED" },
     include: { checks: true },
   });
   if (!audit) {
-    return { status: "error", message: "Completed audit not found." };
+    return {
+      error: {
+        status: "error" as const,
+        message: "Completed audit not found.",
+      },
+    };
   }
   const model = env.AI_GATEWAY_MODEL;
   if (!model) {
-    return { status: "error", message: failureMessages.MODEL_NOT_CONFIGURED };
+    return {
+      error: {
+        status: "error" as const,
+        message: failureMessages.MODEL_NOT_CONFIGURED,
+      },
+    };
   }
   const prospect = await database.prospect.findFirst({
     where: { id: audit.prospectId, userId },
     select: { businessName: true, businessCategory: true },
   });
   if (!prospect) {
-    return { status: "error", message: "Completed audit not found." };
+    return {
+      error: {
+        status: "error" as const,
+        message: "Completed audit not found.",
+      },
+    };
   }
   const recent = await database.opportunityAnalysis.findFirst({
     where: {
@@ -68,8 +217,18 @@ export const analyzeAuditOpportunity = async (
   });
   if (recent) {
     redirect(`/opportunities/${recent.id}`);
-    return;
   }
+  return { context: { userId, audit, model, prospect } };
+};
+
+export const analyzeAuditOpportunity = async (
+  auditId: string
+): Promise<{ status: "error"; message: string } | undefined> => {
+  const resolved = await resolveAnalysisContext(auditId);
+  if ("error" in resolved) {
+    return resolved.error;
+  }
+  const { userId, audit, model, prospect } = resolved.context;
   let analysis: { id: string };
   try {
     analysis = await database.opportunityAnalysis.create({
@@ -112,25 +271,10 @@ export const analyzeAuditOpportunity = async (
 
   try {
     if (scoringResult.disqualifiers.length > 0) {
-      await database.opportunityAnalysis.update({
-        where: { id: analysis.id },
-        data: {
-          status: "COMPLETED",
-          scoringMethod: "DETERMINISTIC",
-          tier: scoringResult.tier,
-          overallScore: 0,
-          categoryScores: scoringResult.categoryScores,
-          scoringBreakdown: asJson(scoringResult.scoringBreakdown),
-          topReasons: asJson(scoringResult.topReasons),
-          disqualifiers: scoringResult.disqualifiers,
-          completedAt: new Date(),
-        },
-      });
-      logger.info("opportunity.analysis.disqualified", {
+      await persistDisqualifiedAnalysis(scoringResult, {
         userId,
         auditId,
         analysisId: analysis.id,
-        disqualifiers: scoringResult.disqualifiers,
       });
     } else {
       const allowedNumbers = buildAllowedNumbers(
@@ -198,36 +342,14 @@ export const analyzeAuditOpportunity = async (
       }
 
       if (generated) {
-        const copyByCategory = new Map(
-          generated.output.recommendations.map((copy) => [
-            copy.serviceCategory,
-            copy,
-          ])
+        const recommendationRows = buildRecommendationRows(
+          analysis.id,
+          recommendations,
+          generated
         );
         await database.$transaction([
           database.opportunityRecommendation.createMany({
-            data: recommendations.map((candidate, position) => {
-              const copy = copyByCategory.get(candidate.serviceCategory);
-              if (!copy) {
-                // validateInterpretationOutput's set-equality check already
-                // guarantees this can't happen; this is a defensive guard.
-                throw new Error(
-                  "Missing interpretation copy for a selected service category"
-                );
-              }
-              return {
-                analysisId: analysis.id,
-                position,
-                title: copy.title,
-                rationale: copy.rationale,
-                action: copy.action,
-                impact: candidate.impact,
-                effort: candidate.effort,
-                serviceCategory: candidate.serviceCategory,
-                confidence: candidate.confidence,
-                auditCheckKeys: candidate.supportingCheckKeys,
-              };
-            }),
+            data: recommendationRows,
           }),
           database.opportunityAnalysis.update({
             where: { id: analysis.id },
@@ -267,44 +389,15 @@ export const analyzeAuditOpportunity = async (
       }
     }
   } catch (error) {
-    const rawCode =
-      typeof error === "object" && error && "code" in error
-        ? String(error.code)
-        : "INTERNAL_ERROR";
-    const failureCode = rawCode in failureMessages ? rawCode : "INTERNAL_ERROR";
-    try {
-      await database.opportunityAnalysis.update({
-        where: { id: analysis.id },
-        data: {
-          status: "FAILED",
-          overallScore: null,
-          executiveSummary: null,
-          overallRationale: null,
-          failureCode,
-          failureMessage: failureMessages[failureCode],
-          completedAt: new Date(),
-        },
-      });
-    } catch (persistenceError) {
-      logger.error("opportunity.persistence.failed", {
-        userId,
-        auditId,
-        analysisId: analysis.id,
-        error: persistenceError,
-      });
-      return {
-        status: "error",
-        message: "Unable to save opportunity analysis.",
-      };
-    }
-    logger.error("opportunity.analysis.failed", {
+    const failureResult = await persistAnalysisFailure(error, {
       userId,
       auditId,
       analysisId: analysis.id,
       model,
-      failureCode,
-      error,
     });
+    if (failureResult) {
+      return failureResult;
+    }
   }
   revalidatePath("/opportunities");
   revalidatePath(`/audits/${auditId}`);
