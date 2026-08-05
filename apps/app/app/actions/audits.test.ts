@@ -85,6 +85,10 @@ describe("runProspectAudit", () => {
           evidence: { secure: true },
         },
       ],
+      screenshot: {
+        status: "captured",
+        url: "https://cdn.example.com/shot.png",
+      },
     });
     transactionMock.mockResolvedValue([]);
     const { runProspectAudit } = await import("./audits");
@@ -92,6 +96,14 @@ describe("runProspectAudit", () => {
     expect(prospectFindMock).toHaveBeenCalledWith({
       where: { id: "prospect_1", userId: "user_owner" },
       select: { id: true, websiteUrl: true },
+    });
+    expect(auditUpdateMock).toHaveBeenCalledWith({
+      where: { id: "audit_1" },
+      data: expect.objectContaining({
+        status: "COMPLETED",
+        screenshotUrl: "https://cdn.example.com/shot.png",
+        screenshotStatus: "captured",
+      }),
     });
     expect(auditCreateMock).toHaveBeenCalledWith({
       data: {
@@ -103,6 +115,35 @@ describe("runProspectAudit", () => {
     });
     expect(transactionMock).toHaveBeenCalled();
     expect(redirectMock).toHaveBeenCalledWith("/audits/audit_1");
+  });
+
+  it("persists a null screenshotUrl when the screenshot is unavailable", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    prospectFindMock.mockResolvedValue({
+      id: "prospect_1",
+      websiteUrl: "https://example.com",
+    });
+    auditCreateMock.mockResolvedValue({ id: "audit_1" });
+    runMock.mockResolvedValue({
+      requestedUrl: "https://example.com/",
+      finalUrl: "https://example.com/",
+      pagesAttempted: 1,
+      pagesAudited: 1,
+      durationMs: 100,
+      checks: [],
+      screenshot: { status: "unavailable", reason: "not_configured" },
+    });
+    transactionMock.mockResolvedValue([]);
+    const { runProspectAudit } = await import("./audits");
+    await runProspectAudit("prospect_1");
+    expect(auditUpdateMock).toHaveBeenCalledWith({
+      where: { id: "audit_1" },
+      data: expect.objectContaining({
+        status: "COMPLETED",
+        screenshotUrl: null,
+        screenshotStatus: "unavailable",
+      }),
+    });
   });
 
   it("stores a safe failed state when the engine rejects the target", async () => {

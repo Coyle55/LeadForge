@@ -82,6 +82,11 @@ export const runProspectAudit = async (
           pagesAttempted: result.pagesAttempted,
           pagesAudited: result.pagesAudited,
           durationMs: result.durationMs,
+          screenshotUrl:
+            result.screenshot.status === "captured"
+              ? result.screenshot.url
+              : null,
+          screenshotStatus: result.screenshot.status,
           completedAt: new Date(),
         },
       }),

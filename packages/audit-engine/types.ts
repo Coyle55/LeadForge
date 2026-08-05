@@ -1,9 +1,12 @@
+import type { ScreenshotProvider } from "./screenshot";
+
 export type ResolveHostname = (hostname: string) => Promise<string[]>;
 
 export interface AuditDependencies {
   fetch?: typeof fetch;
   now?: () => number;
   resolveHostname: ResolveHostname;
+  screenshotProvider?: ScreenshotProvider;
 }
 
 export type AuditCategory =
@@ -11,7 +14,8 @@ export type AuditCategory =
   | "TRUST"
   | "SEO"
   | "TECHNICAL"
-  | "PERFORMANCE";
+  | "PERFORMANCE"
+  | "BOOKING";
 
 export type AuditStatus = "PASS" | "WARNING" | "FAIL";
 

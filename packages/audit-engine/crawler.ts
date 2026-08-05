@@ -23,6 +23,7 @@ export interface PageFacts {
   htmlBytes: number;
   images: number;
   imagesWithAlt: number;
+  imageUrls: string[];
   insecureAssets: number;
   jsonLdCount: number;
   labeledControls: number;
@@ -38,6 +39,7 @@ export interface PageFacts {
 }
 
 export interface CrawlResult {
+  brokenImages: number;
   brokenInternalLinks: number;
   finalUrl: string;
   pages: PageFacts[];
@@ -162,6 +164,17 @@ const parseFacts = (
     imagesWithAlt: images.filter((node) =>
       node.attrs.some((item) => item.name === "alt")
     ).length,
+    imageUrls: images
+      .map((node) => attr(node, "src"))
+      .filter(Boolean)
+      .map((src) => {
+        try {
+          return new URL(src, result.url).href;
+        } catch {
+          return "";
+        }
+      })
+      .filter(Boolean),
     formControls: controls.length,
     labeledControls: controls.filter(
       (node) => labelsFor.has(attr(node, "id")) || attr(node, "aria-label")
@@ -191,6 +204,30 @@ const parseFacts = (
     responseMs: result.responseMs,
     status: result.status,
   };
+};
+
+const countBrokenSamples = async (
+  urls: string[],
+  dependencies: AuditDependencies
+): Promise<number> => {
+  let broken = 0;
+  for (const href of urls) {
+    try {
+      await validatePublicTarget(href, dependencies);
+      const response = await (dependencies.fetch ?? fetch)(href, {
+        method: "HEAD",
+        redirect: "manual",
+        signal: AbortSignal.timeout(5000),
+        headers: { "user-agent": "LeadForgeAudit/1.0" },
+      });
+      if (response.status >= 400) {
+        broken += 1;
+      }
+    } catch {
+      broken += 1;
+    }
+  }
+  return broken;
 };
 
 const preferredScore = (url: string) => {
@@ -254,27 +291,19 @@ export const crawlWebsite = async (
       // A sampled internal-page failure is evidence for later checks, not a fatal run.
     }
   }
-  let brokenInternalLinks = 0;
   const sampledLinks = [...new Set(pages.flatMap((page) => page.links))]
     .filter((href) => new URL(href).origin === origin)
     .slice(0, 20);
-  for (const href of sampledLinks) {
-    try {
-      await validatePublicTarget(href, dependencies);
-      const response = await (dependencies.fetch ?? fetch)(href, {
-        method: "HEAD",
-        redirect: "manual",
-        signal: AbortSignal.timeout(5000),
-        headers: { "user-agent": "LeadForgeAudit/1.0" },
-      });
-      if (response.status >= 400) {
-        brokenInternalLinks += 1;
-      }
-    } catch {
-      brokenInternalLinks += 1;
-    }
-  }
+  const brokenInternalLinks = await countBrokenSamples(
+    sampledLinks,
+    dependencies
+  );
+  const sampledImageUrls = [
+    ...new Set(pages.flatMap((page) => page.imageUrls)),
+  ].slice(0, 20);
+  const brokenImages = await countBrokenSamples(sampledImageUrls, dependencies);
   return {
+    brokenImages,
     brokenInternalLinks,
     requestedUrl: requested.href,
     finalUrl: homepage.url.href,

@@ -143,6 +143,7 @@ enum AuditCheckCategory {
   SEO
   TECHNICAL
   PERFORMANCE
+  BOOKING
 }
 
 model WebsiteAudit {
