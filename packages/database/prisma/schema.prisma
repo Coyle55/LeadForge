@@ -28,7 +28,7 @@ enum PipelineStage {
 }
 
 model Prospect {
-  id            String        @id @default(cuid())
+  id            String                @id @default(cuid())
   userId        String
   businessName  String
   websiteUrl    String?
@@ -37,16 +37,30 @@ model Prospect {
   phone         String?
   location      String?
   notes         String?
-  pipelineStage PipelineStage @default(NEW)
+  pipelineStage PipelineStage         @default(NEW)
   archivedAt    DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
   deal          Deal?
   tasks         Task[]
+  stageChanges  PipelineStageChange[]
 
   @@index([userId, archivedAt])
   @@index([userId, pipelineStage])
   @@index([userId, createdAt])
+}
+
+model PipelineStageChange {
+  id         String         @id @default(cuid())
+  userId     String
+  prospectId String
+  fromStage  PipelineStage?
+  toStage    PipelineStage
+  changedAt  DateTime       @default(now())
+  prospect   Prospect       @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([userId, prospectId, changedAt])
+  @@index([userId, toStage, changedAt])
 }
 
 model Deal {
