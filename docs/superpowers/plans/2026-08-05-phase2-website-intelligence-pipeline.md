@@ -961,12 +961,22 @@ Write `allowed-numbers.test.ts` proving: the universal bounds (`"0"`, `"1"`, `"2
 
 - [ ] **Step 1: Replace the AI output schema**
 
+**This step was revised after the original implementer correctly escalated a real gap**: `OpportunityRecommendation.title`/`rationale`/`action` are required text columns that the existing outreach flow (`apps/app/app/actions/outreach.ts`) already reads to draft real emails, and nothing in the deterministic pipeline (Tasks 1-2) produces that copy. The AI interpretation layer must supply it, scoped to exactly the service categories `selectRecommendations` already chose.
+
 In `types.ts`, replace `OpportunityOutput` with:
 
 ```ts
+export interface RecommendationCopy {
+  action: string;
+  rationale: string;
+  serviceCategory: string;
+  title: string;
+}
+
 export interface InterpretationOutput {
   confidence: "HIGH" | "MEDIUM" | "LOW";
   practicalImpact: string;
+  recommendations: RecommendationCopy[];
   strongestIssue: string;
   suggestedOffer: string;
   summary: string;
@@ -980,6 +990,19 @@ In `schema.ts`, replace `opportunityOutputSchema`/`validateOpportunityOutput` wi
 import { z } from "zod";
 import type { InterpretationOutput } from "./types";
 
+const recommendationCopySchema = z.object({
+  serviceCategory: z.enum([
+    "WEBSITE_REDESIGN",
+    "PERFORMANCE_OPTIMIZATION",
+    "BOOKING_INTEGRATION",
+    "LEAD_CAPTURE_REPAIR",
+    "LEAD_RESPONSE_AUTOMATION",
+  ]),
+  title: z.string().min(5).max(120),
+  rationale: z.string().min(20).max(500),
+  action: z.string().min(20).max(500),
+});
+
 export const interpretationOutputSchema = z
   .object({
     summary: z.string().min(40).max(700),
@@ -988,6 +1011,7 @@ export const interpretationOutputSchema = z
     suggestedOffer: z.string().min(10).max(300),
     confidence: z.enum(["HIGH", "MEDIUM", "LOW"]),
     warnings: z.array(z.string().min(5).max(300)).max(5),
+    recommendations: z.array(recommendationCopySchema).max(2),
   })
   .strict();
 
@@ -995,10 +1019,31 @@ const numberPattern = /-?\d+(\.\d+)?%?/g;
 
 export const validateInterpretationOutput = (
   output: unknown,
-  allowedNumbers: Set<string>
+  allowedNumbers: Set<string>,
+  expectedServiceCategories: string[]
 ): InterpretationOutput => {
   const parsed = interpretationOutputSchema.parse(output);
-  const text = `${parsed.summary} ${parsed.strongestIssue} ${parsed.practicalImpact} ${parsed.suggestedOffer}`;
+
+  const returned = parsed.recommendations.map((r) => r.serviceCategory);
+  const returnedSet = new Set(returned);
+  const expectedSet = new Set(expectedServiceCategories);
+  const isExactMatch =
+    returnedSet.size === returned.length &&
+    returnedSet.size === expectedSet.size &&
+    [...expectedSet].every((category) => returnedSet.has(category));
+  if (!isExactMatch) {
+    throw new Error(
+      "Interpretation recommendations do not match the expected service categories"
+    );
+  }
+
+  const text = [
+    parsed.summary,
+    parsed.strongestIssue,
+    parsed.practicalImpact,
+    parsed.suggestedOffer,
+    ...parsed.recommendations.flatMap((r) => [r.title, r.rationale, r.action]),
+  ].join(" ");
   const found = text.match(numberPattern) ?? [];
   for (const value of found) {
     const normalized = value.replace(/%$/, "");
@@ -1010,7 +1055,7 @@ export const validateInterpretationOutput = (
 };
 ```
 
-`allowedNumbers` is built by the caller from the deterministic output (the score, each category score, and every weight/point value already computed) — this is the mechanism that enforces "must never introduce a number not already present in its input."
+`allowedNumbers` (from `buildAllowedNumbers`, Step 0) is the mechanism that enforces "must never introduce a number not already present in its input." `expectedServiceCategories` (the list of `serviceCategory` values from `selectRecommendations`' output, possibly empty) is the mechanism that guarantees the AI can neither invent a recommendation nor drop one — set equality, not just "at least" or "at most."
 
 - [ ] **Step 2: Replace the system prompt**
 
@@ -1019,7 +1064,9 @@ In `prompt.ts`:
 ```ts
 export const INTERPRETATION_PROMPT_VERSION = "interpretation-v1";
 
-export const INTERPRETATION_SYSTEM_PROMPT = `You are LeadForge's website opportunity interpreter. You receive an ALREADY-COMPUTED deterministic score, tier, category breakdown, top contributing findings, and already-selected service recommendations. Your only job is to explain them in plain language for a business owner deciding whether to reach out.
+export const INTERPRETATION_SYSTEM_PROMPT = `You are LeadForge's website opportunity interpreter. You receive an ALREADY-COMPUTED deterministic score, tier, category breakdown, top contributing findings, and already-selected service recommendations (each with its serviceCategory already chosen — you do not choose or reorder services). Your job is twofold: explain the overall result in plain language for a business owner deciding whether to reach out, and write a short title/rationale/action for each already-selected service category, framed as a reason to reach out.
+
+You must return exactly one title/rationale/action for every service category you were given, in the same set — never add a category that wasn't given to you, never omit one you were given.
 
 You must not invent, recompute, adjust, or restate any number that is not already present in the input you were given. Do not invent traffic, revenue, conversion rates, rankings, legal compliance, costs, customer intent, business size, or guaranteed results. Base every statement only on the supplied findings. Return concise, evidence-based prose, not hidden reasoning or chain-of-thought.`;
 ```
@@ -1032,7 +1079,7 @@ import { INTERPRETATION_SYSTEM_PROMPT } from "./prompt";
 import { interpretationOutputSchema, validateInterpretationOutput } from "./schema";
 
 const timeoutPattern = /timeout|abort/i;
-const invalidOutputPattern = /unlisted number|zod|validation/i;
+const invalidOutputPattern = /unlisted number|zod|validation|expected service categories/i;
 
 export type InterpretationGenerationFailure =
   | "RATE_LIMITED"
@@ -1056,7 +1103,11 @@ interface GenerateResult {
 type Generator = (options: Record<string, unknown>) => Promise<GenerateResult>;
 
 export const generateInterpretation = async (
-  input: { allowedNumbers: string[]; [key: string]: unknown },
+  input: {
+    allowedNumbers: string[];
+    expectedServiceCategories: string[];
+    [key: string]: unknown;
+  },
   options: { model: string; generate?: Generator; now?: () => number }
 ) => {
   const now = options.now ?? Date.now;
@@ -1072,7 +1123,11 @@ export const generateInterpretation = async (
       timeout: 30_000,
       telemetry: { recordInputs: false, recordOutputs: false },
     });
-    const output = validateInterpretationOutput(result.output, new Set(input.allowedNumbers));
+    const output = validateInterpretationOutput(
+      result.output,
+      new Set(input.allowedNumbers),
+      input.expectedServiceCategories
+    );
     return {
       output,
       inputTokens: result.usage.inputTokens,
@@ -1103,11 +1158,18 @@ Rename/adapt existing tests to the new function/schema names and shapes; add one
 
 - [ ] **Step 5: Rewrite `apps/app/app/actions/opportunities.ts`**
 
-Replace the single `generateOpportunity` call with: fetch the audit's checks and the prospect's `businessCategory`; call `computeOpportunityScore` and `selectRecommendations` synchronously (no try/catch needed around these — they are pure and cannot throw for valid input); if `scoringResult.disqualifiers.length > 0`, persist `status: "COMPLETED"`, the disqualifiers, `overallScore: 0`, and skip both interpretation and recommendations entirely (no AI call, no recommendation rows) — this is a valid, useful completed state, not a failure; otherwise call `buildAllowedNumbers(scoringResult, recommendations)` (Step 0), pass its result as `generateInterpretation`'s `allowedNumbers` input field, and persist the deterministic score/tier/breakdown/recommendations together with the AI's interpretation text in one transaction, setting `scoringMethod: "DETERMINISTIC"`. On an `InterpretationGenerationError`, still persist the deterministic score/tier/recommendations as `COMPLETED` (they don't depend on the AI call succeeding) but leave `strongestIssue`/`suggestedOffer`/`confidence`/`warnings`/`executiveSummary`/`overallRationale` null and log the interpretation failure separately — a scoring success should never be discarded because the prose-generation step failed.
+Replace the single `generateOpportunity` call with: fetch the audit's checks and the prospect's `businessCategory`; call `computeOpportunityScore` and `selectRecommendations` synchronously (no try/catch needed around these — they are pure and cannot throw for valid input).
+
+If `scoringResult.disqualifiers.length > 0`, persist `status: "COMPLETED"`, the disqualifiers, `overallScore: 0`, and skip interpretation and recommendations entirely (no AI call, no recommendation rows) — this is a valid, useful completed state, not a failure.
+
+Otherwise: build `allowedNumbers` via `buildAllowedNumbers(scoringResult, recommendations)` (Step 0), build `expectedServiceCategories` as `recommendations.map((r) => r.serviceCategory)`, and call `generateInterpretation` with both plus the rest of the scoring context. **Note the required-text constraint this creates**: `OpportunityRecommendation.title`/`rationale`/`action` are `NOT NULL` columns, and only the AI interpretation call produces that text (Step 1) — so a recommendation row can only ever be created when the interpretation call has actually succeeded. There is no deterministic fallback text; do not fabricate placeholder copy to work around this.
+
+- **On success**: match each `RecommendationCandidate` (Task 2) to its corresponding `RecommendationCopy` (Step 1) by `serviceCategory` (the schema-level set-equality check in `validateInterpretationOutput` already guarantees every candidate has exactly one match, so this lookup cannot miss). In one transaction, create one `OpportunityRecommendation` row per candidate using `serviceCategory`/`confidence`/`impact`/`effort` from the candidate, `title`/`rationale`/`action` from the matched copy, and `auditCheckKeys: candidate.supportingCheckKeys`; update the `OpportunityAnalysis` to `status: "COMPLETED"`, `scoringMethod: "DETERMINISTIC"`, the full deterministic score/tier/breakdown/topReasons, and the AI's overall `summary`/`strongestIssue`/`practicalImpact`/`suggestedOffer`/`confidence`/`warnings` (map `summary`→`executiveSummary` and `practicalImpact`→`overallRationale`, reusing those existing columns as the design specifies).
+- **On `InterpretationGenerationError`**: persist the `OpportunityAnalysis` as `status: "COMPLETED"`, `scoringMethod: "DETERMINISTIC"`, with the full deterministic score/tier/breakdown/topReasons populated (this data is real and complete regardless of the AI call) — but create **zero** `OpportunityRecommendation` rows (there is no title/rationale/action to put in them) and leave `strongestIssue`/`suggestedOffer`/`confidence`/`warnings`/`executiveSummary`/`overallRationale` null. Log the interpretation failure separately from a scoring failure — the score is not a failure here, only the prose-generation step is. The existing "recent RUNNING analysis" redirect-dedup logic already gives the owner an implicit path to trigger a fresh attempt; no new retry UI is needed in this task.
 
 - [ ] **Step 6: Update `opportunities.test.ts`**
 
-Adapt existing tests to the new flow; add cases for: a disqualified audit persisting a completed, zero-score, no-recommendations analysis with no AI call attempted; a successful deterministic score persisting even when `generateInterpretation` throws; the full success path producing `scoringMethod: "DETERMINISTIC"` and populated interpretation fields.
+Adapt existing tests to the new flow; add cases for: a disqualified audit persisting a completed, zero-score, no-recommendations analysis with no AI call attempted; a successful deterministic score persisting with zero recommendation rows (not fabricated ones) when `generateInterpretation` throws; the full success path producing `scoringMethod: "DETERMINISTIC"`, populated interpretation fields, and recommendation rows whose `title`/`rationale`/`action` come from the matched AI copy while `serviceCategory`/`confidence`/`impact`/`effort`/`auditCheckKeys` come from the deterministic candidate.
 
 - [ ] **Step 7: Run tests and verify GREEN**
 

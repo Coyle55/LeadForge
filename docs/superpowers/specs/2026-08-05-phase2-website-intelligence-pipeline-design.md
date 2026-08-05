@@ -120,7 +120,12 @@ Weights sum per service; services scoring ≥3 are kept, sorted descending, capp
 
 ## AI interpretation layer
 
-The AI call is bounded and receives only: `{ tier, overallScore, categoryScores, scoringBreakdown, topReasons, disqualifiers, recommendations (with serviceCategory already chosen) }`. It returns `{ summary, strongestIssue, practicalImpact, suggestedOffer, confidence, warnings }` and must never introduce a number not already present in its input. It never selects a service or computes a score — both already exist before this call runs.
+The AI call is bounded and receives only: `{ tier, overallScore, categoryScores, scoringBreakdown, topReasons, disqualifiers, recommendations (with serviceCategory already chosen) }`. It returns two things, both explanatory prose over already-computed facts, never new facts:
+
+- Overall interpretation: `{ summary, strongestIssue, practicalImpact, suggestedOffer, confidence, warnings }`, unchanged from the original design.
+- Per-recommendation framing text: `{ serviceCategory, title, rationale, action }` for **exactly** the service categories `selectRecommendations` already chose — no more, no fewer, matched by `serviceCategory`, validated as a set-equality check against the input's recommendation list. This is the piece the original design omitted: `OpportunityRecommendation.title`/`rationale`/`action` are required text columns that the existing outreach-drafting flow (`apps/app/app/actions/outreach.ts`) already reads to write real emails, and nothing else in the deterministic pipeline produces that copy. `serviceCategory`/`confidence`/`impact`/`effort` for each `OpportunityRecommendation` row still come entirely from the deterministic `RecommendationCandidate` (Task 2) — the AI only supplies the title/rationale/action prose for the category it's told was already selected.
+
+The AI must never introduce a number not already present in its input, and it never selects a service or computes a score — both already exist before this call runs. If `recommendations` is empty (a healthy site with nothing to recommend), the AI still runs to produce the overall interpretation, with an empty recommendations array in both its input and output.
 
 ## Model changes (additive, minimal)
 
