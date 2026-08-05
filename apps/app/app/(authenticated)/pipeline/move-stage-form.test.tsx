@@ -92,6 +92,70 @@ describe("MoveStageForm", () => {
     expect(screen.getByText("Choose a different stage.")).toBeTruthy();
   });
 
+  it("clears Won feedback when the destination changes and while resubmitting", async () => {
+    let resolveSecondAction: (value: unknown) => void = () => undefined;
+    moveProspectStageMock
+      .mockResolvedValueOnce({
+        fieldErrors: {
+          actualCloseDate: ["Enter a valid close date."],
+          value: ["Enter a positive deal value."],
+        },
+        message: "Check the highlighted fields.",
+        status: "error",
+      })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveSecondAction = resolve;
+          })
+      );
+    const { MoveStageForm } = await import("./move-stage-form");
+
+    render(<MoveStageForm currentStage="PROPOSAL" prospectId="prospect_5" />);
+    const destination = screen.getByLabelText("Move to");
+    fireEvent.change(destination, { target: { value: "WON" } });
+    fireEvent.change(screen.getByLabelText("Deal value (USD)"), {
+      target: { value: "2500" },
+    });
+    fireEvent.change(screen.getByLabelText("Actual close date"), {
+      target: { value: "2026-08-04" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Move prospect" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Check the highlighted fields."
+    );
+    expect(
+      screen.getByLabelText("Deal value (USD)").getAttribute("aria-invalid")
+    ).toBe("true");
+
+    fireEvent.change(destination, { target: { value: "LOST" } });
+
+    const lossReason = screen.getByLabelText("Loss reason");
+    expect(lossReason.hasAttribute("required")).toBe(true);
+    expect(lossReason.getAttribute("aria-invalid")).toBe("false");
+    expect(lossReason.getAttribute("aria-describedby")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText("Enter a positive deal value.")).toBeNull();
+
+    fireEvent.change(destination, { target: { value: "CONTACTED" } });
+    expect(screen.queryByLabelText("Loss reason")).toBeNull();
+    expect(screen.queryByLabelText("Deal value (USD)")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Move prospect" }));
+
+    expect(await screen.findByRole("button", { name: "Moving…" })).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText("Enter a valid close date.")).toBeNull();
+
+    await act(async () => {
+      resolveSecondAction({
+        message: "Prospect moved to Contacted.",
+        status: "success",
+      });
+      await Promise.resolve();
+    });
+  });
+
   it("submits only the ordinary transition fields after leaving Won", async () => {
     let submittedEntries: [string, FormDataEntryValue][] = [];
     moveProspectStageMock.mockImplementation(

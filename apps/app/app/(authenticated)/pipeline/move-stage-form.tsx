@@ -5,7 +5,7 @@ import { Button } from "@repo/design-system/components/ui/button";
 import { Input } from "@repo/design-system/components/ui/input";
 import { Label } from "@repo/design-system/components/ui/label";
 import { Textarea } from "@repo/design-system/components/ui/textarea";
-import { useActionState, useState } from "react";
+import { useActionState, useCallback, useRef, useState } from "react";
 import {
   moveProspectStage,
   type PipelineFormState,
@@ -30,6 +30,11 @@ const FieldError = ({ errors, id }: { errors?: string[]; id: string }) =>
     </p>
   ) : null;
 
+interface DestinationAwarePipelineFormState extends PipelineFormState {
+  submissionDestination?: string | null;
+  submissionRevision?: number;
+}
+
 export const MoveStageForm = ({
   currentStage,
   prospectId,
@@ -37,11 +42,37 @@ export const MoveStageForm = ({
   currentStage: PipelineStage;
   prospectId: string;
 }) => {
-  const [state, action, pending] = useActionState<PipelineFormState, FormData>(
-    moveProspectStage,
-    {}
+  const submissionRevisionRef = useRef(0);
+  const [destinationRevision, setDestinationRevision] = useState(0);
+  const moveForDestination = useCallback(
+    async (
+      previousState: DestinationAwarePipelineFormState,
+      formData: FormData
+    ): Promise<DestinationAwarePipelineFormState> => {
+      const submissionDestination = formData.get("destination");
+      const submissionRevision = submissionRevisionRef.current;
+      const result = await moveProspectStage(previousState, formData);
+      return {
+        ...result,
+        submissionDestination:
+          typeof submissionDestination === "string"
+            ? submissionDestination
+            : null,
+        submissionRevision,
+      };
+    },
+    []
   );
+  const [state, action, pending] = useActionState<
+    DestinationAwarePipelineFormState,
+    FormData
+  >(moveForDestination, {});
   const [destination, setDestination] = useState<PipelineStage | "">("");
+  const feedbackIsCurrent =
+    !pending &&
+    state.submissionDestination === destination &&
+    state.submissionRevision === destinationRevision;
+  const feedbackState: PipelineFormState = feedbackIsCurrent ? state : {};
   const destinationErrorId = `destination-error-${prospectId}`;
   const valueErrorId = `value-error-${prospectId}`;
   const actualCloseErrorId = `actual-close-error-${prospectId}`;
@@ -59,16 +90,20 @@ export const MoveStageForm = ({
         </Label>
         <select
           aria-describedby={
-            state.fieldErrors?.destination ? destinationErrorId : undefined
+            feedbackState.fieldErrors?.destination
+              ? destinationErrorId
+              : undefined
           }
-          aria-invalid={Boolean(state.fieldErrors?.destination)}
+          aria-invalid={Boolean(feedbackState.fieldErrors?.destination)}
           className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-xs shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:bg-input/30"
           disabled={pending}
           id={`destination-${prospectId}`}
           name="destination"
-          onChange={(event) =>
-            setDestination(event.target.value as PipelineStage | "")
-          }
+          onChange={(event) => {
+            submissionRevisionRef.current += 1;
+            setDestinationRevision(submissionRevisionRef.current);
+            setDestination(event.target.value as PipelineStage | "");
+          }}
           value={destination}
         >
           <option value="">Select stage</option>
@@ -81,7 +116,7 @@ export const MoveStageForm = ({
           )}
         </select>
         <FieldError
-          errors={state.fieldErrors?.destination}
+          errors={feedbackState.fieldErrors?.destination}
           id={destinationErrorId}
         />
       </div>
@@ -93,9 +128,9 @@ export const MoveStageForm = ({
             </Label>
             <Input
               aria-describedby={
-                state.fieldErrors?.value ? valueErrorId : undefined
+                feedbackState.fieldErrors?.value ? valueErrorId : undefined
               }
-              aria-invalid={Boolean(state.fieldErrors?.value)}
+              aria-invalid={Boolean(feedbackState.fieldErrors?.value)}
               className="h-8 text-xs"
               disabled={pending}
               id={`value-${prospectId}`}
@@ -106,7 +141,10 @@ export const MoveStageForm = ({
               step="0.01"
               type="number"
             />
-            <FieldError errors={state.fieldErrors?.value} id={valueErrorId} />
+            <FieldError
+              errors={feedbackState.fieldErrors?.value}
+              id={valueErrorId}
+            />
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs" htmlFor={`actual-close-${prospectId}`}>
@@ -114,11 +152,11 @@ export const MoveStageForm = ({
             </Label>
             <Input
               aria-describedby={
-                state.fieldErrors?.actualCloseDate
+                feedbackState.fieldErrors?.actualCloseDate
                   ? actualCloseErrorId
                   : undefined
               }
-              aria-invalid={Boolean(state.fieldErrors?.actualCloseDate)}
+              aria-invalid={Boolean(feedbackState.fieldErrors?.actualCloseDate)}
               className="h-8 text-xs"
               disabled={pending}
               id={`actual-close-${prospectId}`}
@@ -127,7 +165,7 @@ export const MoveStageForm = ({
               type="date"
             />
             <FieldError
-              errors={state.fieldErrors?.actualCloseDate}
+              errors={feedbackState.fieldErrors?.actualCloseDate}
               id={actualCloseErrorId}
             />
           </div>
@@ -140,9 +178,11 @@ export const MoveStageForm = ({
           </Label>
           <Textarea
             aria-describedby={
-              state.fieldErrors?.lossReason ? lossReasonErrorId : undefined
+              feedbackState.fieldErrors?.lossReason
+                ? lossReasonErrorId
+                : undefined
             }
-            aria-invalid={Boolean(state.fieldErrors?.lossReason)}
+            aria-invalid={Boolean(feedbackState.fieldErrors?.lossReason)}
             className="min-h-20 resize-y text-xs"
             disabled={pending}
             id={`loss-reason-${prospectId}`}
@@ -152,7 +192,7 @@ export const MoveStageForm = ({
             rows={3}
           />
           <FieldError
-            errors={state.fieldErrors?.lossReason}
+            errors={feedbackState.fieldErrors?.lossReason}
             id={lossReasonErrorId}
           />
         </div>
@@ -169,16 +209,16 @@ export const MoveStageForm = ({
       <output aria-live="polite" className="sr-only">
         {pending ? "Moving prospect." : ""}
       </output>
-      {state.message ? (
+      {feedbackState.message ? (
         <p
           className={
-            state.status === "error"
+            feedbackState.status === "error"
               ? "rounded-md bg-destructive/8 px-2 py-1.5 text-destructive text-xs"
               : "rounded-md bg-emerald-500/8 px-2 py-1.5 text-emerald-700 text-xs dark:text-emerald-400"
           }
-          role={state.status === "error" ? "alert" : "status"}
+          role={feedbackState.status === "error" ? "alert" : "status"}
         >
-          {state.message}
+          {feedbackState.message}
         </p>
       ) : null}
     </form>
