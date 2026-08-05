@@ -27,6 +27,7 @@ const AuthenticatedLayout = async ({
           </Link>
           <nav className="flex w-full items-center gap-5 overflow-x-auto whitespace-nowrap pb-1 text-sm sm:w-auto sm:pb-0">
             <Link href="/">Dashboard</Link>
+            <Link href="/pipeline">Pipeline</Link>
             <Link href="/prospects">Prospects</Link>
             <Link href="/audits">Audits</Link>
             <Link href="/opportunities">Opportunities</Link>
