@@ -80,6 +80,8 @@ describe("prospect actions", () => {
     expect(redirectMock).toHaveBeenCalledWith(
       "/prospects/prospect_1?created=1"
     );
+    expect(revalidatePathMock).toHaveBeenCalledWith("/prospects");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/pipeline");
   });
 
   it("returns field errors for invalid input", async () => {
@@ -121,30 +123,45 @@ describe("prospect actions", () => {
     ).resolves.toEqual({ status: "error", message: "Prospect not found." });
   });
 
-  it.each([
-    ["archiveProspect", "ARCHIVED"],
-    ["restoreProspect", "NEW"],
-  ])("%s changes status with owner scope", async (actionName, status) => {
+  it("archives with owner scope and a single server timestamp", async () => {
+    const startedAt = Date.now();
     authMock.mockResolvedValue({ userId: "user_owner" });
     updateManyMock.mockResolvedValue({ count: 1 });
     const actions = await import("./prospects");
 
-    const result =
-      await actions[actionName as "archiveProspect" | "restoreProspect"](
-        "prospect_1"
-      );
+    const result = await actions.archiveProspect("prospect_1");
     expect(result).toEqual({
       status: "success",
-      message:
-        status === "ARCHIVED" ? "Prospect archived." : "Prospect restored.",
+      message: "Prospect archived.",
     });
     expect(updateManyMock).toHaveBeenCalledWith({
       where: { id: "prospect_1", userId: "user_owner" },
-      data: { status },
+      data: { archivedAt: expect.any(Date) },
+    });
+    const archivedAt = updateManyMock.mock.calls[0]?.[0]?.data.archivedAt;
+    expect(archivedAt.getTime()).toBeGreaterThanOrEqual(startedAt);
+    expect(archivedAt.getTime()).toBeLessThanOrEqual(Date.now());
+    expect(revalidatePathMock).toHaveBeenCalledWith("/prospects");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/pipeline");
+    expect(revalidatePathMock).toHaveBeenCalledWith("/prospects/prospect_1");
+  });
+
+  it("restores with owner scope and clears only archive state", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    updateManyMock.mockResolvedValue({ count: 1 });
+    const { restoreProspect } = await import("./prospects");
+
+    await expect(restoreProspect("prospect_1")).resolves.toEqual({
+      status: "success",
+      message: "Prospect restored.",
+    });
+    expect(updateManyMock).toHaveBeenCalledWith({
+      where: { id: "prospect_1", userId: "user_owner" },
+      data: { archivedAt: null },
     });
   });
 
-  it("returns a safe database error and logs metadata only", async () => {
+  it("returns a safe database error and logs sanitized metadata only", async () => {
     authMock.mockResolvedValue({ userId: "user_owner" });
     createMock.mockRejectedValue(new Error("database password leaked"));
     const { createProspect } = await import("./prospects");
@@ -153,9 +170,23 @@ describe("prospect actions", () => {
       status: "error",
       message: "Unable to save prospect.",
     });
-    expect(logErrorMock).toHaveBeenCalledWith(
-      "prospect.create.failed",
-      expect.objectContaining({ userId: "user_owner" })
-    );
+    expect(logErrorMock).toHaveBeenCalledWith("prospect.create.failed", {
+      userId: "user_owner",
+    });
+  });
+
+  it("does not log raw errors when archive persistence fails", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    updateManyMock.mockRejectedValue(new Error("database password leaked"));
+    const { archiveProspect } = await import("./prospects");
+
+    await expect(archiveProspect("prospect_1")).resolves.toEqual({
+      status: "error",
+      message: "Unable to update prospect.",
+    });
+    expect(logErrorMock).toHaveBeenCalledWith("prospect.archive_state.failed", {
+      userId: "user_owner",
+      prospectId: "prospect_1",
+    });
   });
 });

@@ -24,6 +24,9 @@ const hostname = (value: string | null) => {
   }
 };
 
+const humanizePipelineStage = (stage: string) =>
+  stage.charAt(0) + stage.slice(1).toLowerCase();
+
 const ProspectsPage = async ({
   searchParams,
 }: {
@@ -58,13 +61,13 @@ const ProspectsPage = async ({
       {prospects.length === 0 ? (
         <div className="rounded-lg border border-dashed p-14 text-center">
           <h2 className="font-medium text-lg">
-            {input.search || input.status !== "ACTIVE"
+            {input.search || input.stage || input.status !== "ACTIVE"
               ? "No matching prospects"
               : "Build your prospect list"}
           </h2>
           <p className="mt-2 text-muted-foreground text-sm">
-            {input.search || input.status !== "ACTIVE"
-              ? "Adjust the search or status filter and try again."
+            {input.search || input.stage || input.status !== "ACTIVE"
+              ? "Adjust the search, archive, or pipeline stage filter and try again."
               : "Add the first business you want to qualify."}
           </p>
           {input.page > 1 ? (
@@ -84,7 +87,8 @@ const ProspectsPage = async ({
                 <TableHead>Business</TableHead>
                 <TableHead>Contact</TableHead>
                 <TableHead>Location</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>Pipeline stage</TableHead>
+                <TableHead>Archive state</TableHead>
                 <TableHead className="text-right">Updated</TableHead>
               </TableRow>
             </TableHeader>
@@ -110,12 +114,15 @@ const ProspectsPage = async ({
                   </TableCell>
                   <TableCell>{prospect.location ?? "—"}</TableCell>
                   <TableCell>
+                    <Badge variant="outline">
+                      {humanizePipelineStage(prospect.pipelineStage)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
                     <Badge
-                      variant={
-                        prospect.status === "ARCHIVED" ? "secondary" : "outline"
-                      }
+                      variant={prospect.archivedAt ? "secondary" : "outline"}
                     >
-                      {prospect.status.toLowerCase()}
+                      {prospect.archivedAt ? "Archived" : "Active"}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right text-muted-foreground text-xs">

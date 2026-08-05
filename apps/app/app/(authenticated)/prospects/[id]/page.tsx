@@ -15,6 +15,9 @@ import { RunAuditButton } from "../../audits/run-audit-button";
 import { ProspectForm } from "../prospect-form";
 import { StatusButton } from "../status-button";
 
+const humanizePipelineStage = (stage: string) =>
+  stage.charAt(0) + stage.slice(1).toLowerCase();
+
 const ProspectDetailPage = async ({
   params,
   searchParams,
@@ -56,11 +59,14 @@ const ProspectDetailPage = async ({
             {prospect.businessName}
           </h1>
         </div>
-        <Badge
-          variant={prospect.status === "ARCHIVED" ? "secondary" : "outline"}
-        >
-          {prospect.status.toLowerCase()}
-        </Badge>
+        <div className="flex gap-2">
+          <Badge variant="outline">
+            {humanizePipelineStage(prospect.pipelineStage)}
+          </Badge>
+          <Badge variant={prospect.archivedAt ? "secondary" : "outline"}>
+            {prospect.archivedAt ? "Archived" : "Active"}
+          </Badge>
+        </div>
       </div>
       {query.created === "1" ? (
         <p className="rounded-md border border-emerald-800/40 bg-emerald-950/20 px-4 py-3 text-emerald-600 text-sm">
@@ -121,7 +127,7 @@ const ProspectDetailPage = async ({
       </Card>
       <div className="border-t pt-6">
         <StatusButton
-          archived={prospect.status === "ARCHIVED"}
+          archived={Boolean(prospect.archivedAt)}
           prospectId={prospect.id}
         />
       </div>

@@ -61,8 +61,9 @@ export const createProspect = async (
     prospectId = prospect.id;
     logger.info("prospect.create.succeeded", { userId, prospectId });
     revalidatePath("/prospects");
-  } catch (error) {
-    logger.error("prospect.create.failed", { userId, error });
+    revalidatePath("/pipeline");
+  } catch {
+    logger.error("prospect.create.failed", { userId });
     return { status: "error", message: "Unable to save prospect." };
   }
 
@@ -101,17 +102,18 @@ export const updateProspect = async (
     }
     logger.info("prospect.update.succeeded", { userId, prospectId });
     revalidatePath("/prospects");
+    revalidatePath("/pipeline");
     revalidatePath(`/prospects/${prospectId}`);
     return { status: "success", message: "Prospect saved." };
-  } catch (error) {
-    logger.error("prospect.update.failed", { userId, prospectId, error });
+  } catch {
+    logger.error("prospect.update.failed", { userId, prospectId });
     return { status: "error", message: "Unable to save prospect." };
   }
 };
 
-const changeProspectStatus = async (
+const setProspectArchiveState = async (
   prospectId: string,
-  status: "ARCHIVED" | "NEW"
+  archived: boolean
 ): Promise<ProspectActionResult> => {
   const userId = await authorize();
   if (!userId) {
@@ -119,34 +121,34 @@ const changeProspectStatus = async (
   }
 
   try {
+    const archivedAt = archived ? new Date() : null;
     const result = await database.prospect.updateMany({
       where: { id: prospectId, userId },
-      data: { status },
+      data: { archivedAt },
     });
     if (result.count === 0) {
       return { status: "error", message: "Prospect not found." };
     }
-    logger.info("prospect.status.succeeded", { userId, prospectId, status });
+    logger.info("prospect.archive_state.succeeded", {
+      userId,
+      prospectId,
+      archived,
+    });
     revalidatePath("/prospects");
+    revalidatePath("/pipeline");
     revalidatePath(`/prospects/${prospectId}`);
     return {
       status: "success",
-      message:
-        status === "ARCHIVED" ? "Prospect archived." : "Prospect restored.",
+      message: archived ? "Prospect archived." : "Prospect restored.",
     };
-  } catch (error) {
-    logger.error("prospect.status.failed", {
-      userId,
-      prospectId,
-      status,
-      error,
-    });
+  } catch {
+    logger.error("prospect.archive_state.failed", { userId, prospectId });
     return { status: "error", message: "Unable to update prospect." };
   }
 };
 
 export const archiveProspect = async (prospectId: string) =>
-  await changeProspectStatus(prospectId, "ARCHIVED");
+  await setProspectArchiveState(prospectId, true);
 
 export const restoreProspect = async (prospectId: string) =>
-  await changeProspectStatus(prospectId, "NEW");
+  await setProspectArchiveState(prospectId, false);

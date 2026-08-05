@@ -3,7 +3,7 @@ import { Input } from "@repo/design-system/components/ui/input";
 import Link from "next/link";
 import type { ProspectListInput } from "./queries";
 
-export const ListControls = ({ search, status }: ProspectListInput) => (
+export const ListControls = ({ search, stage, status }: ProspectListInput) => (
   <div className="flex flex-col gap-3 border-border/70 border-y py-4 sm:flex-row sm:items-center">
     <form className="flex flex-1 flex-col gap-3 sm:flex-row" method="get">
       <Input
@@ -19,9 +19,20 @@ export const ListControls = ({ search, status }: ProspectListInput) => (
         name="status"
       >
         <option value="ACTIVE">Active</option>
-        <option value="NEW">New</option>
-        <option value="QUALIFIED">Qualified</option>
         <option value="ARCHIVED">Archived</option>
+      </select>
+      <select
+        className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+        defaultValue={stage ?? ""}
+        name="stage"
+      >
+        <option value="">All pipeline stages</option>
+        <option value="NEW">New</option>
+        <option value="CONTACTED">Contacted</option>
+        <option value="INTERESTED">Interested</option>
+        <option value="PROPOSAL">Proposal</option>
+        <option value="WON">Won</option>
+        <option value="LOST">Lost</option>
       </select>
       <Button type="submit" variant="outline">
         Apply

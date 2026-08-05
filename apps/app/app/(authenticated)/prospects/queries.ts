@@ -1,18 +1,29 @@
-import { database, type Prisma } from "@repo/database";
+import { database, type PipelineStage, type Prisma } from "@repo/database";
 
 export const PROSPECT_PAGE_SIZE = 25;
 
-export type ProspectListStatus = "ACTIVE" | "NEW" | "QUALIFIED" | "ARCHIVED";
+export type ProspectListStatus = "ACTIVE" | "ARCHIVED";
+
+export const PIPELINE_STAGES = [
+  "NEW",
+  "CONTACTED",
+  "INTERESTED",
+  "PROPOSAL",
+  "WON",
+  "LOST",
+] as const satisfies readonly PipelineStage[];
 
 interface RawProspectListParams {
   page?: string | string[];
   search?: string | string[];
+  stage?: string | string[];
   status?: string | string[];
 }
 
 export interface ProspectListInput {
   page: number;
   search?: string;
+  stage?: PipelineStage;
   status: ProspectListStatus;
 }
 
@@ -24,16 +35,18 @@ export const parseProspectListParams = (
 ): ProspectListInput => {
   const parsedPage = Number.parseInt(first(params.page) ?? "1", 10);
   const rawStatus = first(params.status)?.toUpperCase();
-  const status: ProspectListStatus = ["NEW", "QUALIFIED", "ARCHIVED"].includes(
-    rawStatus ?? ""
-  )
-    ? (rawStatus as ProspectListStatus)
-    : "ACTIVE";
+  const status: ProspectListStatus =
+    rawStatus === "ARCHIVED" ? "ARCHIVED" : "ACTIVE";
+  const rawStage = first(params.stage)?.toUpperCase();
+  const stage = PIPELINE_STAGES.includes(rawStage as PipelineStage)
+    ? (rawStage as PipelineStage)
+    : undefined;
   const search = first(params.search)?.trim() || undefined;
 
   return {
     page: Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1,
     search,
+    stage,
     status,
   };
 };
@@ -41,12 +54,14 @@ export const parseProspectListParams = (
 export const getProspects = async ({
   userId,
   search,
+  stage,
   status,
   page,
 }: ProspectListInput & { userId: string }) => {
   const where: Prisma.ProspectWhereInput = {
     userId,
-    status: status === "ACTIVE" ? { in: ["NEW", "QUALIFIED"] } : status,
+    archivedAt: status === "ACTIVE" ? null : { not: null },
+    ...(stage ? { pipelineStage: stage } : {}),
     ...(search
       ? {
           OR: ["businessName", "websiteUrl", "contactName", "contactEmail"].map(
