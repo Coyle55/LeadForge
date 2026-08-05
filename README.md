@@ -46,6 +46,7 @@ The authenticated application routes are:
 - `/opportunities/[id]` — evidence-linked score and recommendations
 - `/outreach` — completed and failed outreach-draft history
 - `/outreach/[id]` — edit, copy, or reset an evidence-grounded draft
+- `/reports` — pipeline funnel/conversion, win rate, revenue, and activity trends over the trailing 12 months
 - `/settings` — update the owner's display name and Outreach Profile
 
 ## Commands
