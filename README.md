@@ -1,6 +1,6 @@
 # LeadForge
 
-LeadForge is a private, single-owner lead workspace. M0 established authentication and persistence, M1 added manual prospect management, M2 added deterministic website audits, M3 turns completed audit evidence into AI-generated opportunity scoring and recommendations, and M4 prepares editable outreach drafts from one selected recommendation.
+LeadForge is a private, single-owner lead workspace. M0 established authentication and persistence, M1 added manual prospect management, M2 added deterministic website audits, M3 turns completed audit evidence into AI-generated opportunity scoring and recommendations, M4 prepares editable outreach drafts from one selected recommendation, and M5 adds a fixed sales pipeline, one optional Deal per prospect, and manual follow-up Tasks.
 
 ## Requirements
 
@@ -35,7 +35,9 @@ bun run db:studio
 The authenticated application routes are:
 
 - `/` — account and database overview
-- `/prospects` — searchable, status-filtered prospect list
+- `/pipeline` — six-stage active-prospect pipeline and explicit stage controls
+- `/tasks` — filterable owner-scoped follow-up queue
+- `/prospects` — searchable, archive- and pipeline-stage-filtered prospect list
 - `/prospects/new` — create a prospect
 - `/prospects/[id]` — edit, archive, or restore an owned prospect
 - `/audits` — owner-scoped website audit history
@@ -185,3 +187,33 @@ Apply `20260805010000_m4_outreach_generation` with `bun run migrate:deploy` befo
 10. Run `bun run check`, `bun run test`, `SKIP_ENV_VALIDATION=true bun run build`, `git diff --check`, and `bun run migrate:deploy`; confirm the production build lists `/outreach` and `/outreach/[id]`.
 
 M4 only prepares drafts; it never sends email. Email providers, sequences, follow-ups, HTML email, contact discovery, bulk generation, autonomous outreach, delivery/open tracking, unsubscribe management, QStash, webhooks, callbacks, tasks, deals, analytics, and additional services remain deferred.
+
+## M5 pipeline, tasks, and deals
+
+M5 turns each owned prospect into one lightweight sales opportunity. `Prospect.pipelineStage` stores one of New, Contacted, Interested, Proposal, Won, or Lost, while nullable `archivedAt` independently controls active/archive visibility. Archiving preserves the stage, Deal, and Tasks; restoring returns the prospect to its stored stage. Archived prospects do not appear on `/pipeline` and remain read-only until restored.
+
+A prospect may have one optional Deal and many manually managed Tasks. Deal editing begins at Interested. Interested and Proposal accept an optional positive USD value and expected close date. Moving to Won requires a positive value and actual close date; moving to Lost requires a trimmed loss reason. Won clears a prior loss reason, Lost clears a prior actual close date, and moving either terminal stage back to New, Contacted, Interested, or Proposal clears both terminal fields while preserving the Deal value and expected close date. No stage or Deal action creates or changes a Task.
+
+Tasks require a title, due date/time, and High, Medium, or Low priority. Complete sets the Task to Completed with the current completion time; Reopen returns it to Open and clears that timestamp. Task entry, display, Due today boundaries, and Dashboard counts use the fixed M5 timezone `America/New_York`; Due today spans local midnight inclusive to the next local midnight exclusive, while Overdue includes every open Task whose due instant has passed.
+
+M5 requires no new environment variables, external accounts, or services. Apply both M5 migrations to the configured database before local acceptance or production traffic:
+
+```bash
+bun run migrate:deploy
+```
+
+This deploys `20260805030000_m5_pipeline_tasks_deals`, which maps legacy `NEW` to New, `QUALIFIED` to Interested, and `ARCHIVED` to New plus a migration-time `archivedAt`, followed by `20260805040000_m5_task_priority_sort_order`, which establishes High-to-Low database priority order. Use `bun run migrate` only while developing a new local migration.
+
+### M5 acceptance flow
+
+1. Apply both migrations and verify legacy New, Qualified, and Archived rows by aggregate stage/archive counts only.
+2. In `/pipeline`, move one active prospect through New, Contacted, Interested, and Proposal using the explicit controls.
+3. At Interested or Proposal, save an optional Deal value and expected close date and confirm both persist after refresh.
+4. Confirm Won is blocked without a positive value and actual close date, then supply both and close successfully.
+5. Confirm Lost requires a reason, then reopen the prospect to a non-terminal stage and confirm actual close date and loss reason are cleared while value/expected close remain.
+6. From prospect detail, create and edit multiple Tasks across High, Medium, and Low priority; complete and reopen them, refreshing after every state change to confirm persistence.
+7. In `/tasks`, verify Open, Due today, Overdue, Completed, and priority filters. Confirm Dashboard counts link to the matching Task views and `/pipeline` and that open Deal value includes only active Interested/Proposal prospects.
+8. Archive the prospect and confirm its card leaves `/pipeline`; restore it and confirm the card returns at the preserved stage with Deal and Task history intact.
+9. Confirm the browser console contains no application errors, then run `bun run check`, `bun run test`, `SKIP_ENV_VALIDATION=true bun run build`, Prisma validation, and `git diff --check`.
+
+M5 does not add drag-and-drop, automatic Task creation, sending or tracking outreach, multiple Deals per prospect, customizable stages, permanent deletion, reminders, notifications, calendar sync, charts, forecasting analytics, QStash, webhooks, or another service. All reads and mutations remain owner-scoped inside the existing `apps/app` deployment.
