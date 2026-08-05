@@ -909,10 +909,55 @@ git commit -m "feat: add phase 2 opportunity, activity, and outreach schema"
 - Modify: `apps/app/app/lib/opportunity/schema.test.ts`
 - Modify: `apps/app/app/actions/opportunities.ts`
 - Modify: `apps/app/app/actions/opportunities.test.ts`
+- Create: `apps/app/app/lib/opportunity/allowed-numbers.ts`
+- Create: `apps/app/app/lib/opportunity/allowed-numbers.test.ts`
 
 **Interfaces:**
-- Consumes: `computeOpportunityScore` (Task 1), `selectRecommendations` (Task 2), all new Prisma fields (Task 3).
-- Produces: `InterpretationInput`, `InterpretationOutput`, `generateInterpretation(input, options)` — replaces `generateOpportunity`.
+- Consumes: `computeOpportunityScore`/`ScoringResult` (Task 1), `selectRecommendations`/`RecommendationCandidate` (Task 2), all new Prisma fields (Task 3).
+- Produces: `InterpretationInput`, `InterpretationOutput`, `generateInterpretation(input, options)` — replaces `generateOpportunity`. `buildAllowedNumbers(scoring: ScoringResult, recommendations: RecommendationCandidate[]): string[]`.
+
+- [ ] **Step 0: Implement `buildAllowedNumbers`**
+
+This exists so "which numbers may the AI's prose reference" is a precise, testable function rather than an ad hoc list assembled inline in the server action.
+
+```ts
+// allowed-numbers.ts
+import type { RecommendationCandidate } from "./recommend";
+import type { ScoringResult } from "./scoring";
+
+export const buildAllowedNumbers = (
+  scoring: ScoringResult,
+  recommendations: RecommendationCandidate[]
+): string[] => {
+  const numbers = new Set<string>();
+  const add = (value: number) => numbers.add(String(value));
+
+  // Universal bounds and small structural counts (recommendations.length
+  // is always 0-2) that are safe to reference even though they aren't
+  // literally one of the computed point values below.
+  add(0);
+  add(1);
+  add(2);
+  add(100);
+
+  add(scoring.overallScore);
+  for (const value of Object.values(scoring.categoryScores)) {
+    add(value);
+  }
+  for (const entry of scoring.scoringBreakdown) {
+    add(entry.points);
+  }
+  for (const reason of scoring.topReasons) {
+    add(reason.points);
+  }
+  for (const candidate of recommendations) {
+    add(candidate.weight);
+  }
+  return [...numbers];
+};
+```
+
+Write `allowed-numbers.test.ts` proving: the universal bounds (`"0"`, `"1"`, `"2"`, `"100"`) are always present; every category score, breakdown point value, top-reason point value, and recommendation weight from a representative `ScoringResult`/`RecommendationCandidate[]` pair appears in the output; no duplicates (it's built from a `Set`).
 
 - [ ] **Step 1: Replace the AI output schema**
 
@@ -1058,7 +1103,7 @@ Rename/adapt existing tests to the new function/schema names and shapes; add one
 
 - [ ] **Step 5: Rewrite `apps/app/app/actions/opportunities.ts`**
 
-Replace the single `generateOpportunity` call with: fetch the audit's checks and the prospect's `businessCategory`; call `computeOpportunityScore` and `selectRecommendations` synchronously (no try/catch needed around these — they are pure and cannot throw for valid input); if `scoringResult.disqualifiers.length > 0`, persist `status: "COMPLETED"`, the disqualifiers, `overallScore: 0`, and skip both interpretation and recommendations entirely (no AI call, no recommendation rows) — this is a valid, useful completed state, not a failure; otherwise build `allowedNumbers` from the scoring result and recommendation weights, call `generateInterpretation`, and persist the deterministic score/tier/breakdown/recommendations together with the AI's interpretation text in one transaction, setting `scoringMethod: "DETERMINISTIC"`. On an `InterpretationGenerationError`, still persist the deterministic score/tier/recommendations as `COMPLETED` (they don't depend on the AI call succeeding) but leave `strongestIssue`/`suggestedOffer`/`confidence`/`warnings`/`executiveSummary`/`overallRationale` null and log the interpretation failure separately — a scoring success should never be discarded because the prose-generation step failed.
+Replace the single `generateOpportunity` call with: fetch the audit's checks and the prospect's `businessCategory`; call `computeOpportunityScore` and `selectRecommendations` synchronously (no try/catch needed around these — they are pure and cannot throw for valid input); if `scoringResult.disqualifiers.length > 0`, persist `status: "COMPLETED"`, the disqualifiers, `overallScore: 0`, and skip both interpretation and recommendations entirely (no AI call, no recommendation rows) — this is a valid, useful completed state, not a failure; otherwise call `buildAllowedNumbers(scoringResult, recommendations)` (Step 0), pass its result as `generateInterpretation`'s `allowedNumbers` input field, and persist the deterministic score/tier/breakdown/recommendations together with the AI's interpretation text in one transaction, setting `scoringMethod: "DETERMINISTIC"`. On an `InterpretationGenerationError`, still persist the deterministic score/tier/recommendations as `COMPLETED` (they don't depend on the AI call succeeding) but leave `strongestIssue`/`suggestedOffer`/`confidence`/`warnings`/`executiveSummary`/`overallRationale` null and log the interpretation failure separately — a scoring success should never be discarded because the prose-generation step failed.
 
 - [ ] **Step 6: Update `opportunities.test.ts`**
 
