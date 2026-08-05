@@ -52,9 +52,12 @@ const form = (values: Record<string, string>) => {
 const revalidatedPaths = () =>
   revalidatePathMock.mock.calls.map(([path]) => path);
 
+const prismaError = (code: "P2002" | "P2034", message: string) =>
+  Object.assign(new Error(message), { code });
+
 describe("pipeline and Deal actions", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     process.env.ALLOWED_USER_IDS = "user_owner";
     transactionMock.mockImplementation(
       async (callback: (client: typeof transaction) => unknown) =>
@@ -65,7 +68,12 @@ describe("pipeline and Deal actions", () => {
       pipelineStage: "PROPOSAL",
     });
     prospectUpdateManyMock.mockResolvedValue({ count: 1 });
-    dealFindFirstMock.mockResolvedValue({ id: "deal_1" });
+    dealFindFirstMock.mockResolvedValue({
+      actualCloseDate: new Date("2026-08-04T12:00:00.000Z"),
+      id: "deal_1",
+      lossReason: null,
+      valueCents: 125_000,
+    });
     dealCreateMock.mockResolvedValue({ id: "deal_1" });
     dealUpdateManyMock.mockResolvedValue({ count: 1 });
   });
@@ -435,6 +443,72 @@ describe("pipeline and Deal actions", () => {
     expect(JSON.stringify(logErrorMock.mock.calls)).not.toContain("internals");
   });
 
+  it("retries a serialization conflict before committing one transition", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    let attempts = 0;
+    transactionMock.mockImplementation(
+      async (callback: (client: typeof transaction) => unknown) => {
+        attempts += 1;
+        if (attempts === 1) {
+          throw prismaError(
+            "P2034",
+            "transaction serialization details leaked"
+          );
+        }
+        return await callback(transaction);
+      }
+    );
+    const { moveProspectStage } = await import("./pipeline");
+
+    await expect(
+      moveProspectStage(
+        {},
+        form({ destination: "PROPOSAL", prospectId: "prospect_1" })
+      )
+    ).resolves.toEqual({
+      message: "Prospect moved to Proposal.",
+      status: "success",
+    });
+    expect(transactionMock).toHaveBeenCalledTimes(2);
+    expect(logInfoMock).toHaveBeenCalledOnce();
+    expect(revalidatedPaths()).toEqual([
+      "/pipeline",
+      "/prospects/prospect_1",
+      "/prospects",
+      "/",
+    ]);
+    expect(JSON.stringify(logErrorMock.mock.calls)).not.toContain(
+      "serialization details"
+    );
+  });
+
+  it("returns one safe transition failure after bounded retry exhaustion", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    transactionMock.mockImplementation(() =>
+      Promise.reject(
+        prismaError("P2034", "transaction serialization details leaked")
+      )
+    );
+    const { moveProspectStage } = await import("./pipeline");
+
+    await expect(
+      moveProspectStage(
+        {},
+        form({ destination: "PROPOSAL", prospectId: "prospect_1" })
+      )
+    ).resolves.toEqual({
+      message: "Unable to move prospect.",
+      status: "error",
+    });
+    expect(transactionMock).toHaveBeenCalledTimes(3);
+    expect(logInfoMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+    expect(logErrorMock).toHaveBeenCalledOnce();
+    expect(JSON.stringify(logErrorMock.mock.calls)).not.toContain(
+      "serialization details"
+    );
+  });
+
   it("saves only editable Deal fields for an owned active eligible prospect", async () => {
     authMock.mockResolvedValue({ userId: "user_owner" });
     prospectFindFirstMock.mockResolvedValue({
@@ -472,7 +546,12 @@ describe("pipeline and Deal actions", () => {
       },
     });
     expect(dealFindFirstMock).toHaveBeenCalledWith({
-      select: { id: true },
+      select: {
+        actualCloseDate: true,
+        id: true,
+        lossReason: true,
+        valueCents: true,
+      },
       where: { prospectId: "prospect_1", userId: "user_owner" },
     });
     expect(dealUpdateManyMock).toHaveBeenCalledWith({
@@ -513,6 +592,167 @@ describe("pipeline and Deal actions", () => {
       },
       select: { id: true },
     });
+  });
+
+  it("rejects a blank value that would invalidate an existing Won Deal", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    prospectFindFirstMock.mockResolvedValue({
+      id: "prospect_1",
+      pipelineStage: "WON",
+    });
+    dealFindFirstMock.mockResolvedValue({
+      actualCloseDate: new Date("2026-08-04T12:00:00.000Z"),
+      id: "deal_1",
+      lossReason: null,
+      valueCents: 125_000,
+    });
+    const { saveDeal } = await import("./pipeline");
+
+    await expect(
+      saveDeal(
+        {},
+        form({ expectedCloseDate: "", prospectId: "prospect_1", value: "" })
+      )
+    ).resolves.toEqual({
+      message: "Deal closing details are incomplete.",
+      status: "error",
+    });
+    expect(dealUpdateManyMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("does not create a Won Deal without an actual close date", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    prospectFindFirstMock.mockResolvedValue({
+      id: "prospect_1",
+      pipelineStage: "WON",
+    });
+    dealFindFirstMock.mockResolvedValue(null);
+    const { saveDeal } = await import("./pipeline");
+
+    await expect(
+      saveDeal(
+        {},
+        form({
+          expectedCloseDate: "2026-09-15",
+          prospectId: "prospect_1",
+          value: "500",
+        })
+      )
+    ).resolves.toEqual({
+      message: "Deal closing details are incomplete.",
+      status: "error",
+    });
+    expect(dealCreateMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("does not create or update a Lost Deal without a loss reason", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    prospectFindFirstMock.mockResolvedValue({
+      id: "prospect_1",
+      pipelineStage: "LOST",
+    });
+    dealFindFirstMock.mockResolvedValue({
+      actualCloseDate: null,
+      id: "deal_1",
+      lossReason: null,
+      valueCents: 125_000,
+    });
+    const { saveDeal } = await import("./pipeline");
+
+    await expect(
+      saveDeal(
+        {},
+        form({
+          expectedCloseDate: "2026-09-15",
+          prospectId: "prospect_1",
+          value: "500",
+        })
+      )
+    ).resolves.toEqual({
+      message: "Deal closing details are incomplete.",
+      status: "error",
+    });
+    expect(dealUpdateManyMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
+  it("retries a first-create unique conflict and succeeds through the update path", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    prospectFindFirstMock.mockResolvedValue({
+      id: "prospect_1",
+      pipelineStage: "PROPOSAL",
+    });
+    let dealLoads = 0;
+    dealFindFirstMock.mockImplementation(() => {
+      dealLoads += 1;
+      return Promise.resolve(
+        dealLoads === 1
+          ? null
+          : {
+              actualCloseDate: null,
+              id: "deal_concurrent",
+              lossReason: null,
+              valueCents: null,
+            }
+      );
+    });
+    dealCreateMock.mockImplementation(() =>
+      Promise.reject(prismaError("P2002", "unique constraint target leaked"))
+    );
+    const { saveDeal } = await import("./pipeline");
+
+    await expect(
+      saveDeal(
+        {},
+        form({
+          expectedCloseDate: "2026-09-15",
+          prospectId: "prospect_1",
+          value: "500",
+        })
+      )
+    ).resolves.toEqual({ message: "Deal saved.", status: "success" });
+    expect(transactionMock).toHaveBeenCalledTimes(2);
+    expect(dealCreateMock).toHaveBeenCalledOnce();
+    expect(dealUpdateManyMock).toHaveBeenCalledOnce();
+    expect(logInfoMock).toHaveBeenCalledOnce();
+    expect(revalidatedPaths()).toEqual([
+      "/pipeline",
+      "/prospects/prospect_1",
+      "/prospects",
+      "/",
+    ]);
+    expect(JSON.stringify(logErrorMock.mock.calls)).not.toContain(
+      "constraint target"
+    );
+  });
+
+  it("returns one safe Deal failure after bounded retry exhaustion", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    transactionMock.mockImplementation(() =>
+      Promise.reject(
+        prismaError("P2034", "transaction serialization details leaked")
+      )
+    );
+    const { saveDeal } = await import("./pipeline");
+
+    await expect(
+      saveDeal(
+        {},
+        form({ expectedCloseDate: "", prospectId: "prospect_1", value: "" })
+      )
+    ).resolves.toEqual({
+      message: "Unable to save deal.",
+      status: "error",
+    });
+    expect(transactionMock).toHaveBeenCalledTimes(3);
+    expect(logInfoMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+    expect(logErrorMock).toHaveBeenCalledOnce();
+    expect(JSON.stringify(logErrorMock.mock.calls)).not.toContain(
+      "serialization details"
+    );
   });
 
   it("blocks Deal editing outside the four active Deal stages", async () => {

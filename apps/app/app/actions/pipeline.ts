@@ -2,9 +2,14 @@
 
 import { isAllowedUserId } from "@repo/auth";
 import { auth } from "@repo/auth/server";
-import { database, type PipelineStage } from "@repo/database";
+import { database, type PipelineStage, type Prisma } from "@repo/database";
 import { logger } from "@repo/observability";
-import { dealEditSchema, pipelineTransitionSchema } from "@repo/validation";
+import {
+  type DealEditInput,
+  dealEditSchema,
+  type PipelineTransitionInput,
+  pipelineTransitionSchema,
+} from "@repo/validation";
 import { revalidatePath } from "next/cache";
 
 export interface PipelineFormState {
@@ -27,6 +32,8 @@ type PipelineMutationMetadata = Record<string, unknown> & {
 };
 
 class MutationRaceError extends Error {}
+
+const MAX_TRANSACTION_ATTEMPTS = 3;
 
 const DEAL_EDIT_STAGES = new Set<PipelineStage>([
   "INTERESTED",
@@ -130,6 +137,229 @@ const invalidFormResult = (
 const humanizeStage = (stage: PipelineStage) =>
   stage.charAt(0) + stage.slice(1).toLowerCase();
 
+const getPrismaErrorCode = (error: unknown) => {
+  if (!(typeof error === "object" && error !== null && "code" in error)) {
+    return null;
+  }
+
+  const { code } = error as { code?: unknown };
+  return typeof code === "string" ? code : null;
+};
+
+const runRetriableTransaction = async <Result>(
+  operation: () => Promise<Result>
+): Promise<Result> => {
+  let lastError: unknown;
+  let retriedUniqueConflict = false;
+
+  for (let attempt = 1; attempt <= MAX_TRANSACTION_ATTEMPTS; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      const code = getPrismaErrorCode(error);
+      const retrySerializationConflict = code === "P2034";
+      const retryFirstCreateConflict =
+        code === "P2002" && !retriedUniqueConflict;
+
+      if (
+        attempt === MAX_TRANSACTION_ATTEMPTS ||
+        !(retrySerializationConflict || retryFirstCreateConflict)
+      ) {
+        throw error;
+      }
+      if (retryFirstCreateConflict) {
+        retriedUniqueConflict = true;
+      }
+    }
+  }
+
+  throw lastError;
+};
+
+interface OwnedDealId {
+  id: string;
+}
+
+interface TerminalDealSnapshot extends OwnedDealId {
+  actualCloseDate: Date | null;
+  lossReason: string | null;
+  valueCents: number | null;
+}
+
+const getTerminalData = (transition: PipelineTransitionInput) => {
+  if (transition.destination === "WON") {
+    return {
+      valueCents: transition.valueCents,
+      actualCloseDate: transition.actualCloseDate,
+      lossReason: null,
+    };
+  }
+  if (transition.destination === "LOST") {
+    return {
+      actualCloseDate: null,
+      lossReason: transition.lossReason,
+    };
+  }
+  return { actualCloseDate: null, lossReason: null };
+};
+
+const persistTransitionDeal = async ({
+  transaction,
+  deal,
+  prospectId,
+  userId,
+  transition,
+}: {
+  deal: OwnedDealId | null;
+  prospectId: string;
+  transaction: Prisma.TransactionClient;
+  transition: PipelineTransitionInput;
+  userId: string;
+}) => {
+  const data = getTerminalData(transition);
+  if (deal) {
+    const result = await transaction.deal.updateMany({
+      where: { id: deal.id, prospectId, userId },
+      data,
+    });
+    if (result.count !== 1) {
+      throw new MutationRaceError();
+    }
+    return;
+  }
+
+  if (transition.destination === "WON" || transition.destination === "LOST") {
+    await transaction.deal.create({
+      data: { userId, prospectId, ...data },
+      select: { id: true },
+    });
+  }
+};
+
+const executeMoveTransaction = async ({
+  prospectId,
+  transition,
+  userId,
+}: {
+  prospectId: string;
+  transition: PipelineTransitionInput;
+  userId: string;
+}) =>
+  await database.$transaction(
+    async (transaction) => {
+      const prospect = await transaction.prospect.findFirst({
+        where: { id: prospectId, userId, archivedAt: null },
+        select: { id: true, pipelineStage: true },
+      });
+      if (!prospect) {
+        return "not_found" as const;
+      }
+
+      const deal = await transaction.deal.findFirst({
+        where: { prospectId: prospect.id, userId },
+        select: { id: true },
+      });
+      await persistTransitionDeal({
+        transaction,
+        deal,
+        prospectId: prospect.id,
+        userId,
+        transition,
+      });
+
+      const result = await transaction.prospect.updateMany({
+        where: {
+          id: prospect.id,
+          userId,
+          archivedAt: null,
+          pipelineStage: prospect.pipelineStage,
+        },
+        data: { pipelineStage: transition.destination },
+      });
+      if (result.count !== 1) {
+        throw new MutationRaceError();
+      }
+
+      return "success" as const;
+    },
+    { isolationLevel: "Serializable" }
+  );
+
+const hasValidTerminalState = (
+  stage: PipelineStage,
+  deal: TerminalDealSnapshot | null,
+  input: DealEditInput
+) => {
+  if (stage === "WON") {
+    return (
+      Number.isInteger(input.valueCents) &&
+      (input.valueCents ?? 0) > 0 &&
+      deal?.actualCloseDate !== null &&
+      deal?.actualCloseDate !== undefined
+    );
+  }
+  if (stage === "LOST") {
+    return Boolean(deal?.lossReason?.trim());
+  }
+  return true;
+};
+
+const executeSaveDealTransaction = async ({
+  input,
+  prospectId,
+  userId,
+}: {
+  input: DealEditInput;
+  prospectId: string;
+  userId: string;
+}) =>
+  await database.$transaction(
+    async (transaction) => {
+      const prospect = await transaction.prospect.findFirst({
+        where: { id: prospectId, userId, archivedAt: null },
+        select: { id: true, pipelineStage: true },
+      });
+      if (!prospect) {
+        return "not_found" as const;
+      }
+      if (!DEAL_EDIT_STAGES.has(prospect.pipelineStage)) {
+        return "invalid_stage" as const;
+      }
+
+      const deal = await transaction.deal.findFirst({
+        where: { prospectId: prospect.id, userId },
+        select: {
+          id: true,
+          valueCents: true,
+          actualCloseDate: true,
+          lossReason: true,
+        },
+      });
+      if (!hasValidTerminalState(prospect.pipelineStage, deal, input)) {
+        return "invalid_terminal_state" as const;
+      }
+
+      if (deal) {
+        const result = await transaction.deal.updateMany({
+          where: { id: deal.id, prospectId: prospect.id, userId },
+          data: input,
+        });
+        if (result.count !== 1) {
+          throw new MutationRaceError();
+        }
+      } else {
+        await transaction.deal.create({
+          data: { userId, prospectId: prospect.id, ...input },
+          select: { id: true },
+        });
+      }
+
+      return "success" as const;
+    },
+    { isolationLevel: "Serializable" }
+  );
+
 export const moveProspectStage = async (
   _previousState: PipelineFormState,
   formData: FormData
@@ -148,7 +378,7 @@ export const moveProspectStage = async (
     });
   }
 
-  const { actualCloseDate, destination, lossReason, valueCents } = parsed.data;
+  const { destination } = parsed.data;
   const metadata: PipelineMutationMetadata = {
     action: "move",
     destination,
@@ -157,67 +387,8 @@ export const moveProspectStage = async (
   };
 
   try {
-    const outcome = await database.$transaction(
-      async (transaction) => {
-        const prospect = await transaction.prospect.findFirst({
-          where: { id: prospectId, userId, archivedAt: null },
-          select: { id: true, pipelineStage: true },
-        });
-        if (!prospect) {
-          return "not_found" as const;
-        }
-
-        const deal = await transaction.deal.findFirst({
-          where: { prospectId: prospect.id, userId },
-          select: { id: true },
-        });
-
-        let terminalData: {
-          actualCloseDate: Date | null;
-          lossReason: string | null;
-          valueCents?: number | null;
-        } = { actualCloseDate: null, lossReason: null };
-        if (destination === "WON") {
-          terminalData = { valueCents, actualCloseDate, lossReason: null };
-        } else if (destination === "LOST") {
-          terminalData = { actualCloseDate: null, lossReason };
-        }
-
-        if (deal) {
-          const dealResult = await transaction.deal.updateMany({
-            where: { id: deal.id, prospectId: prospect.id, userId },
-            data: terminalData,
-          });
-          if (dealResult.count !== 1) {
-            throw new MutationRaceError();
-          }
-        } else if (destination === "WON" || destination === "LOST") {
-          await transaction.deal.create({
-            data: {
-              userId,
-              prospectId: prospect.id,
-              ...terminalData,
-            },
-            select: { id: true },
-          });
-        }
-
-        const prospectResult = await transaction.prospect.updateMany({
-          where: {
-            id: prospect.id,
-            userId,
-            archivedAt: null,
-            pipelineStage: prospect.pipelineStage,
-          },
-          data: { pipelineStage: destination },
-        });
-        if (prospectResult.count !== 1) {
-          throw new MutationRaceError();
-        }
-
-        return "success" as const;
-      },
-      { isolationLevel: "Serializable" }
+    const outcome = await runRetriableTransaction(async () =>
+      executeMoveTransaction({ prospectId, transition: parsed.data, userId })
     );
 
     if (outcome === "not_found") {
@@ -266,41 +437,8 @@ export const saveDeal = async (
   };
 
   try {
-    const outcome = await database.$transaction(
-      async (transaction) => {
-        const prospect = await transaction.prospect.findFirst({
-          where: { id: prospectId, userId, archivedAt: null },
-          select: { id: true, pipelineStage: true },
-        });
-        if (!prospect) {
-          return "not_found" as const;
-        }
-        if (!DEAL_EDIT_STAGES.has(prospect.pipelineStage)) {
-          return "invalid_stage" as const;
-        }
-
-        const deal = await transaction.deal.findFirst({
-          where: { prospectId: prospect.id, userId },
-          select: { id: true },
-        });
-        if (deal) {
-          const result = await transaction.deal.updateMany({
-            where: { id: deal.id, prospectId: prospect.id, userId },
-            data: parsed.data,
-          });
-          if (result.count !== 1) {
-            throw new MutationRaceError();
-          }
-        } else {
-          await transaction.deal.create({
-            data: { userId, prospectId: prospect.id, ...parsed.data },
-            select: { id: true },
-          });
-        }
-
-        return "success" as const;
-      },
-      { isolationLevel: "Serializable" }
+    const outcome = await runRetriableTransaction(async () =>
+      executeSaveDealTransaction({ input: parsed.data, prospectId, userId })
     );
 
     if (outcome === "not_found") {
@@ -309,6 +447,12 @@ export const saveDeal = async (
     if (outcome === "invalid_stage") {
       return {
         message: "Deal editing is not available at this stage.",
+        status: "error",
+      };
+    }
+    if (outcome === "invalid_terminal_state") {
+      return {
+        message: "Deal closing details are incomplete.",
         status: "error",
       };
     }
