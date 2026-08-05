@@ -11,6 +11,7 @@ import {
   BriefcaseBusiness,
   CalendarClock,
   CircleDollarSign,
+  LineChart,
   TriangleAlert,
 } from "lucide-react";
 import Link from "next/link";
@@ -58,6 +59,14 @@ const Dashboard = async () => {
       label: "Open Deal value",
       tone: "text-emerald-600",
       value: currencyFormatter.format(metrics.openDealValueCents / 100),
+    },
+    {
+      description: "Pipeline, revenue, and activity trends",
+      href: "/reports",
+      icon: LineChart,
+      label: "Reports",
+      tone: "text-violet-600",
+      value: "View",
     },
   ];
 

@@ -11,17 +11,17 @@ const MONTH_LABEL_FORMATTER = new Intl.DateTimeFormat("en-US", {
   year: "numeric",
 });
 
-export const getTrailingMonths = (
-  now: Date,
-  count: number
-): MonthBucket[] => {
+export const getTrailingMonths = (now: Date, count: number): MonthBucket[] => {
   const months: MonthBucket[] = [];
-  const currentMonthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  const currentMonthStart = Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    1
+  );
 
   for (let offset = count - 1; offset >= 0; offset -= 1) {
     const start = new Date(
-      Date.UTC(1970, 0, 1) +
-        (currentMonthStart - Date.UTC(1970, 0, 1))
+      Date.UTC(1970, 0, 1) + (currentMonthStart - Date.UTC(1970, 0, 1))
     );
     start.setUTCMonth(start.getUTCMonth() - offset);
     const end = new Date(start);

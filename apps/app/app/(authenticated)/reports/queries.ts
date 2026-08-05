@@ -1,6 +1,10 @@
 import { database, type PipelineStage } from "@repo/database";
 
-import { getTrailingMonths, type MonthBucket, sumByMonth } from "../../lib/reports/months";
+import {
+  getTrailingMonths,
+  type MonthBucket,
+  sumByMonth,
+} from "../../lib/reports/months";
 
 const ACTIVE_FUNNEL_STAGES: PipelineStage[] = [
   "NEW",
@@ -99,7 +103,9 @@ export const getReportsMetrics = async (
         })
       )
     ),
-    Promise.all(ACTIVE_FUNNEL_STAGES.map((stage) => countReached(userId, stage))),
+    Promise.all(
+      ACTIVE_FUNNEL_STAGES.map((stage) => countReached(userId, stage))
+    ),
     database.deal.findMany({
       where: {
         userId,
@@ -162,7 +168,8 @@ export const getReportsMetrics = async (
     (date) => date >= windowStart && date <= now
   ).length;
   const closedInWindow = wonCountInWindow + lostCountInWindow;
-  const winRate = closedInWindow === 0 ? null : wonCountInWindow / closedInWindow;
+  const winRate =
+    closedInWindow === 0 ? null : wonCountInWindow / closedInWindow;
 
   const monthlyPoints = toMonthlyPoints(months);
   const revenueValues = sumByMonth(
@@ -171,7 +178,11 @@ export const getReportsMetrics = async (
     (deal) => deal.actualCloseDate as Date,
     (deal) => deal.valueCents ?? 0
   );
-  const createdCounts = sumByMonth(months, createdTasks, (task) => task.createdAt);
+  const createdCounts = sumByMonth(
+    months,
+    createdTasks,
+    (task) => task.createdAt
+  );
   const completedCounts = sumByMonth(
     months,
     completedTasks,

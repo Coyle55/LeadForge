@@ -99,8 +99,12 @@ describe("getReportsMetrics", () => {
 
     const metrics = await getReportsMetrics("user_owner", now);
 
-    const august = metrics.revenueTrend.find((point) => point.month === "2026-08");
-    const july = metrics.revenueTrend.find((point) => point.month === "2026-07");
+    const august = metrics.revenueTrend.find(
+      (point) => point.month === "2026-08"
+    );
+    const july = metrics.revenueTrend.find(
+      (point) => point.month === "2026-07"
+    );
     expect(august?.valueCents).toBe(150_000);
     expect(july?.valueCents).toBe(0);
   });
