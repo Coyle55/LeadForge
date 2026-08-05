@@ -148,21 +148,23 @@ describe("computeOpportunityScore", () => {
   });
 
   it("orders top reasons by point contribution descending, capped at 5", () => {
+    // Deliberately excludes http_status: a FAILed http_status check means
+    // every page in the crawl returned a non-2xx status, which is exactly
+    // the SITE_UNREACHABLE disqualifier condition tested above — including
+    // it here would disqualify this input instead of scoring it normally.
     const result = computeOpportunityScore({
       checks: [
-        check("http_status", "TECHNICAL", "FAIL"),
-        check("https", "TRUST", "FAIL"),
-        check("contact_path", "TRUST", "FAIL"),
-        check("viewport_meta", "TECHNICAL", "FAIL"),
-        check("booking_detection", "BOOKING", "FAIL"),
-        check("calls_to_action", "TRUST", "FAIL"),
-        check("page_title", "ACCESSIBILITY", "FAIL"),
+        check("contact_path", "TRUST", "FAIL"), // 15
+        check("viewport_meta", "TECHNICAL", "FAIL"), // 12
+        check("calls_to_action", "TRUST", "FAIL"), // 10
+        check("booking_detection", "BOOKING", "FAIL"), // 8
+        check("page_title", "ACCESSIBILITY", "FAIL"), // 3
       ],
       pagesAudited: 1,
       businessCategory: null,
     });
     expect(result.topReasons).toHaveLength(5);
-    expect(result.topReasons[0].checkKey).toBe("http_status");
+    expect(result.topReasons[0].checkKey).toBe("contact_path");
     const points = result.topReasons.map((r) => r.points);
     expect([...points]).toEqual([...points].sort((a, b) => b - a));
   });
@@ -194,6 +196,14 @@ export const CATEGORY_CAPS: Record<string, number> = {
   SEO: 8,
   FRESHNESS: 2,
 };
+
+// The BOOKING cap doubles for appointment-driven businesses, matching the
+// booking_detection point-value multiplier below. Without this, the raw
+// fail value (8) already equals the base cap (8), so doubling the raw
+// points before capping would have zero effect on overallScore — the cap
+// must scale with the multiplier for it to mean anything.
+export const getCategoryCap = (category: string, isAppointmentDriven: boolean): number =>
+  category === "BOOKING" && isAppointmentDriven ? 16 : CATEGORY_CAPS[category];
 
 export const CATEGORY_MAX_POSSIBLE: Record<string, number> = {
   TRUST: 20 + 15 + 10 + 5 + 3 + 10 + 8,
@@ -302,6 +312,7 @@ import {
   BOOKING_WEIGHT_MULTIPLIER,
   CATEGORY_CAPS,
   CATEGORY_MAX_POSSIBLE,
+  getCategoryCap,
   NEGATIVE_MODIFIERS,
   POINT_TABLE,
   type CheckStatus,
@@ -420,11 +431,11 @@ export const computeOpportunityScore = (input: ScoringInput): ScoringResult => {
 
   const categoryScores: Record<string, number> = {};
   let overallScore = 0;
-  for (const [category, cap] of Object.entries(CATEGORY_CAPS)) {
+  for (const category of Object.keys(CATEGORY_CAPS)) {
     const raw = rawByCategory[category] ?? 0;
     const maxPossible = CATEGORY_MAX_POSSIBLE[category] ?? 1;
     categoryScores[category.toLowerCase()] = Math.min(100, Math.round((raw / maxPossible) * 100));
-    overallScore += Math.min(raw, cap);
+    overallScore += Math.min(raw, getCategoryCap(category, isAppointmentDriven));
   }
   overallScore = Math.min(100, Math.round(overallScore));
 
