@@ -209,11 +209,17 @@ const TasksPage = async ({
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end">
-                        <TaskStatusButton
-                          status={task.status}
-                          taskId={task.id}
-                          taskTitle={task.title}
-                        />
+                        {task.prospectArchived ? (
+                          <span className="max-w-44 text-muted-foreground text-xs">
+                            Archived prospect — restore it to update tasks.
+                          </span>
+                        ) : (
+                          <TaskStatusButton
+                            status={task.status}
+                            taskId={task.id}
+                            taskTitle={task.title}
+                          />
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>

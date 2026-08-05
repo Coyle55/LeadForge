@@ -42,6 +42,11 @@ const valid = {
   priority: "HIGH",
 };
 
+const activeOwnedTask = {
+  prospect: { archivedAt: null },
+  prospectId: "prospect_1",
+};
+
 const databaseCallCount = () =>
   [
     prospectFindFirstMock,
@@ -93,7 +98,10 @@ describe("task actions", () => {
 
   it("reloads the owned active prospect and creates from trusted fields only", async () => {
     authMock.mockResolvedValue({ userId: "user_owner" });
-    prospectFindFirstMock.mockResolvedValue({ id: "prospect_1" });
+    prospectFindFirstMock.mockResolvedValue({
+      archivedAt: null,
+      id: "prospect_1",
+    });
     taskCreateMock.mockResolvedValue({ id: "task_1" });
     const { createTask } = await import("./tasks");
 
@@ -115,9 +123,8 @@ describe("task actions", () => {
       where: {
         id: "prospect_1",
         userId: "user_owner",
-        archivedAt: null,
       },
-      select: { id: true },
+      select: { archivedAt: true, id: true },
     });
     expect(taskCreateMock).toHaveBeenCalledWith({
       data: {
@@ -167,9 +174,41 @@ describe("task actions", () => {
     expect(taskCreateMock).not.toHaveBeenCalled();
   });
 
+  it("rejects a forged create replay for an owned archived prospect", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    prospectFindFirstMock.mockResolvedValue({
+      archivedAt: new Date("2026-08-04T12:00:00.000Z"),
+      id: "prospect_1",
+    });
+    const { createTask } = await import("./tasks");
+
+    await expect(
+      createTask(
+        "prospect_1",
+        {},
+        form({
+          ...valid,
+          archivedAt: "",
+          prospectId: "prospect_active_forgery",
+          userId: "user_victim",
+        })
+      )
+    ).resolves.toEqual({
+      status: "error",
+      message: "Archived prospects are read-only. Restore the prospect first.",
+    });
+
+    expect(prospectFindFirstMock).toHaveBeenCalledWith({
+      where: { id: "prospect_1", userId: "user_owner" },
+      select: { archivedAt: true, id: true },
+    });
+    expect(taskCreateMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
   it("edits only title dueAt and priority through an owner-scoped update", async () => {
     authMock.mockResolvedValue({ userId: "user_owner" });
-    taskFindFirstMock.mockResolvedValue({ prospectId: "prospect_1" });
+    taskFindFirstMock.mockResolvedValue(activeOwnedTask);
     taskUpdateManyMock.mockResolvedValue({ count: 1 });
     const { updateTask } = await import("./tasks");
 
@@ -188,11 +227,22 @@ describe("task actions", () => {
     ).resolves.toEqual({ status: "success", message: "Task saved." });
 
     expect(taskFindFirstMock).toHaveBeenCalledWith({
-      where: { id: "task_1", userId: "user_owner" },
-      select: { prospectId: true },
+      where: {
+        id: "task_1",
+        prospect: { userId: "user_owner" },
+        userId: "user_owner",
+      },
+      select: {
+        prospect: { select: { archivedAt: true } },
+        prospectId: true,
+      },
     });
     expect(taskUpdateManyMock).toHaveBeenCalledWith({
-      where: { id: "task_1", userId: "user_owner" },
+      where: {
+        id: "task_1",
+        prospect: { archivedAt: null, userId: "user_owner" },
+        userId: "user_owner",
+      },
       data: {
         title: "Follow up with Acme",
         dueAt: new Date("2026-08-04T13:30:00.000Z"),
@@ -209,7 +259,7 @@ describe("task actions", () => {
   it("completes only an owned open task with one server timestamp", async () => {
     const startedAt = Date.now();
     authMock.mockResolvedValue({ userId: "user_owner" });
-    taskFindFirstMock.mockResolvedValue({ prospectId: "prospect_1" });
+    taskFindFirstMock.mockResolvedValue(activeOwnedTask);
     taskUpdateManyMock.mockResolvedValue({ count: 1 });
     const { completeTask } = await import("./tasks");
 
@@ -218,7 +268,12 @@ describe("task actions", () => {
       message: "Task completed.",
     });
     expect(taskUpdateManyMock).toHaveBeenCalledWith({
-      where: { id: "task_1", userId: "user_owner", status: "OPEN" },
+      where: {
+        id: "task_1",
+        prospect: { archivedAt: null, userId: "user_owner" },
+        status: "OPEN",
+        userId: "user_owner",
+      },
       data: { status: "COMPLETED", completedAt: expect.any(Date) },
     });
     const completedAt = taskUpdateManyMock.mock.calls[0]?.[0]?.data.completedAt;
@@ -233,7 +288,7 @@ describe("task actions", () => {
 
   it("reopens only an owned completed task and clears completedAt", async () => {
     authMock.mockResolvedValue({ userId: "user_owner" });
-    taskFindFirstMock.mockResolvedValue({ prospectId: "prospect_1" });
+    taskFindFirstMock.mockResolvedValue(activeOwnedTask);
     taskUpdateManyMock.mockResolvedValue({ count: 1 });
     const { reopenTask } = await import("./tasks");
 
@@ -244,6 +299,7 @@ describe("task actions", () => {
     expect(taskUpdateManyMock).toHaveBeenCalledWith({
       where: {
         id: "task_1",
+        prospect: { archivedAt: null, userId: "user_owner" },
         userId: "user_owner",
         status: "COMPLETED",
       },
@@ -258,9 +314,9 @@ describe("task actions", () => {
 
   it("uses one safe result for absent tasks and invalid state transitions", async () => {
     authMock.mockResolvedValue({ userId: "user_owner" });
-    taskFindFirstMock.mockResolvedValueOnce(null).mockResolvedValueOnce({
-      prospectId: "prospect_1",
-    });
+    taskFindFirstMock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(activeOwnedTask);
     taskUpdateManyMock.mockResolvedValue({ count: 0 });
     const { completeTask, updateTask } = await import("./tasks");
 
@@ -274,9 +330,62 @@ describe("task actions", () => {
     expect(revalidatePathMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "update",
+    "complete",
+    "reopen",
+  ] as const)("blocks an archived task %s replay before any write", async (action) => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    taskFindFirstMock.mockResolvedValue({
+      prospect: {
+        archivedAt: new Date("2026-08-04T12:00:00.000Z"),
+      },
+      prospectId: "prospect_1",
+    });
+    const actions = await import("./tasks");
+
+    let result: Awaited<ReturnType<typeof actions.updateTask>>;
+    if (action === "update") {
+      result = await actions.updateTask(
+        "task_1",
+        {},
+        form({
+          ...valid,
+          prospectId: "prospect_active_forgery",
+          userId: "user_victim",
+        })
+      );
+    } else if (action === "complete") {
+      result = await actions.completeTask("task_1");
+    } else {
+      result = await actions.reopenTask("task_1");
+    }
+
+    expect(result).toEqual({
+      status: "error",
+      message: "Archived prospects are read-only. Restore the prospect first.",
+    });
+    expect(taskFindFirstMock).toHaveBeenCalledWith({
+      where: {
+        id: "task_1",
+        prospect: { userId: "user_owner" },
+        userId: "user_owner",
+      },
+      select: {
+        prospect: { select: { archivedAt: true } },
+        prospectId: true,
+      },
+    });
+    expect(taskUpdateManyMock).not.toHaveBeenCalled();
+    expect(revalidatePathMock).not.toHaveBeenCalled();
+  });
+
   it("logs only IDs action and a safe code when create persistence fails", async () => {
     authMock.mockResolvedValue({ userId: "user_owner" });
-    prospectFindFirstMock.mockResolvedValue({ id: "prospect_1" });
+    prospectFindFirstMock.mockResolvedValue({
+      archivedAt: null,
+      id: "prospect_1",
+    });
     taskCreateMock.mockRejectedValue(new Error("database password leaked"));
     const { createTask } = await import("./tasks");
 
@@ -302,7 +411,10 @@ describe("task actions", () => {
 
   it("keeps a committed create successful when cache revalidation fails", async () => {
     authMock.mockResolvedValue({ userId: "user_owner" });
-    prospectFindFirstMock.mockResolvedValue({ id: "prospect_1" });
+    prospectFindFirstMock.mockResolvedValue({
+      archivedAt: null,
+      id: "prospect_1",
+    });
     taskCreateMock.mockResolvedValue({ id: "task_1" });
     revalidatePathMock.mockImplementationOnce(() => {
       throw new Error("cache internals leaked");
@@ -331,7 +443,7 @@ describe("task actions", () => {
 
   it("keeps a committed update successful when success logging fails", async () => {
     authMock.mockResolvedValue({ userId: "user_owner" });
-    taskFindFirstMock.mockResolvedValue({ prospectId: "prospect_1" });
+    taskFindFirstMock.mockResolvedValue(activeOwnedTask);
     taskUpdateManyMock.mockResolvedValue({ count: 1 });
     logInfoMock.mockImplementationOnce(() => {
       throw new Error("logger internals leaked");
@@ -358,7 +470,7 @@ describe("task actions", () => {
     ["reopen", "update"],
   ] as const)("logs sanitized metadata when %s persistence fails", async (action, messageVerb) => {
     authMock.mockResolvedValue({ userId: "user_owner" });
-    taskFindFirstMock.mockResolvedValue({ prospectId: "prospect_1" });
+    taskFindFirstMock.mockResolvedValue(activeOwnedTask);
     taskUpdateManyMock.mockRejectedValue(
       new Error("database password leaked for Sensitive customer follow-up")
     );

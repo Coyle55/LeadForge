@@ -7,6 +7,7 @@ import {
   UserRound,
 } from "lucide-react";
 import Link from "next/link";
+import { APP_TIME_ZONE } from "../../lib/tasks/time";
 import { MoveStageForm } from "./move-stage-form";
 import type { PipelineCard as PipelineCardData } from "./queries";
 
@@ -18,8 +19,9 @@ const currencyFormatter = new Intl.NumberFormat("en-US", {
 });
 
 const dueDateFormatter = new Intl.DateTimeFormat("en-US", {
-  month: "short",
   day: "numeric",
+  month: "short",
+  timeZone: APP_TIME_ZONE,
 });
 
 const getHostname = (websiteUrl: string | null) => {

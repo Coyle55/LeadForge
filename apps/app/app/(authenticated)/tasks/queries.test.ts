@@ -194,7 +194,11 @@ describe("task queries", () => {
       { id: "task_2", prospectId: "prospect_2" },
     ]);
     prospectFindManyMock.mockResolvedValue([
-      { businessName: "Acme", id: "prospect_1" },
+      {
+        archivedAt: new Date("2026-08-04T12:00:00.000Z"),
+        businessName: "Acme",
+        id: "prospect_1",
+      },
     ]);
     const { getTasks } = await import("./queries");
 
@@ -209,13 +213,17 @@ describe("task queries", () => {
     ).resolves.toMatchObject({
       pageCount: 0,
       tasks: [
-        { id: "task_1", prospectName: "Acme" },
-        { id: "task_2", prospectName: "Unknown prospect" },
+        { id: "task_1", prospectArchived: true, prospectName: "Acme" },
+        {
+          id: "task_2",
+          prospectArchived: true,
+          prospectName: "Unknown prospect",
+        },
       ],
       total: 0,
     });
     expect(prospectFindManyMock).toHaveBeenCalledWith({
-      select: { businessName: true, id: true },
+      select: { archivedAt: true, businessName: true, id: true },
       where: {
         id: { in: ["prospect_1", "prospect_2"] },
         userId: "user_owner",

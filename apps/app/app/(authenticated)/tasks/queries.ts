@@ -103,17 +103,24 @@ export const getTasks = async ({
   const prospectIds = [...new Set(tasks.map(({ prospectId }) => prospectId))];
   const prospects = await database.prospect.findMany({
     where: { userId, id: { in: prospectIds } },
-    select: { id: true, businessName: true },
+    select: { id: true, businessName: true, archivedAt: true },
   });
-  const prospectNames = new Map(
-    prospects.map(({ id, businessName }) => [id, businessName])
+  const prospectDetails = new Map(
+    prospects.map(({ id, businessName, archivedAt }) => [
+      id,
+      { archived: archivedAt !== null, businessName },
+    ])
   );
 
   return {
-    tasks: tasks.map((task) => ({
-      ...task,
-      prospectName: prospectNames.get(task.prospectId) ?? "Unknown prospect",
-    })),
+    tasks: tasks.map((task) => {
+      const prospect = prospectDetails.get(task.prospectId);
+      return {
+        ...task,
+        prospectArchived: prospect?.archived ?? true,
+        prospectName: prospect?.businessName ?? "Unknown prospect",
+      };
+    }),
     total,
     pageCount: Math.ceil(total / TASK_PAGE_SIZE),
   };

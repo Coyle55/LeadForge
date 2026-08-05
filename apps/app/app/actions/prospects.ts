@@ -19,6 +19,12 @@ export interface ProspectActionResult {
   status: "success" | "error";
 }
 
+type ProspectMutationAction = "archive" | "create" | "restore" | "update";
+interface ProspectMutationIds {
+  prospectId: string;
+  userId: string;
+}
+
 const authorize = async () => {
   const { userId } = await auth();
   return userId && isAllowedUserId(userId) ? userId : null;
@@ -34,6 +40,54 @@ const parseForm = (formData: FormData) =>
     phone: formData.get("phone"),
     websiteUrl: formData.get("websiteUrl"),
   });
+
+const safeErrorLog = (event: string, metadata: Record<string, unknown>) => {
+  try {
+    logger.error(event, metadata);
+  } catch {
+    // Observability must never change an action result.
+  }
+};
+
+const logMutationSuccess = (
+  event: string,
+  metadata: Record<string, unknown>,
+  action: ProspectMutationAction,
+  ids: ProspectMutationIds
+) => {
+  try {
+    logger.info(event, metadata);
+  } catch {
+    safeErrorLog("prospect.observability.failed", {
+      action,
+      code: "LOGGING_ERROR",
+      ...ids,
+    });
+  }
+};
+
+const revalidateProspectPaths = (
+  paths: string[],
+  action: ProspectMutationAction,
+  ids: ProspectMutationIds
+) => {
+  let failed = false;
+  for (const path of paths) {
+    try {
+      revalidatePath(path);
+    } catch {
+      failed = true;
+    }
+  }
+
+  if (failed) {
+    safeErrorLog("prospect.revalidation.failed", {
+      action,
+      code: "CACHE_REVALIDATION_ERROR",
+      ...ids,
+    });
+  }
+};
 
 export const createProspect = async (
   _previousState: ProspectFormState,
@@ -59,13 +113,14 @@ export const createProspect = async (
       data: { userId, ...parsed.data },
     });
     prospectId = prospect.id;
-    logger.info("prospect.create.succeeded", { userId, prospectId });
-    revalidatePath("/prospects");
-    revalidatePath("/pipeline");
   } catch {
-    logger.error("prospect.create.failed", { userId });
+    safeErrorLog("prospect.create.failed", { userId });
     return { status: "error", message: "Unable to save prospect." };
   }
+
+  const ids = { userId, prospectId };
+  logMutationSuccess("prospect.create.succeeded", ids, "create", ids);
+  revalidateProspectPaths(["/prospects", "/pipeline", "/"], "create", ids);
 
   redirect(`/prospects/${prospectId}?created=1`);
   return { status: "success", message: "Prospect created." };
@@ -100,15 +155,19 @@ export const updateProspect = async (
     if (result.count === 0) {
       return { status: "error", message: "Prospect not found." };
     }
-    logger.info("prospect.update.succeeded", { userId, prospectId });
-    revalidatePath("/prospects");
-    revalidatePath("/pipeline");
-    revalidatePath(`/prospects/${prospectId}`);
-    return { status: "success", message: "Prospect saved." };
   } catch {
-    logger.error("prospect.update.failed", { userId, prospectId });
+    safeErrorLog("prospect.update.failed", { userId, prospectId });
     return { status: "error", message: "Unable to save prospect." };
   }
+
+  const ids = { userId, prospectId };
+  logMutationSuccess("prospect.update.succeeded", ids, "update", ids);
+  revalidateProspectPaths(
+    ["/prospects", "/pipeline", `/prospects/${prospectId}`],
+    "update",
+    ids
+  );
+  return { status: "success", message: "Prospect saved." };
 };
 
 const setProspectArchiveState = async (
@@ -120,6 +179,7 @@ const setProspectArchiveState = async (
     return { status: "error", message: "Not authorized." };
   }
 
+  const action = archived ? "archive" : "restore";
   try {
     const archivedAt = archived ? new Date() : null;
     const result = await database.prospect.updateMany({
@@ -129,22 +189,27 @@ const setProspectArchiveState = async (
     if (result.count === 0) {
       return { status: "error", message: "Prospect not found." };
     }
-    logger.info("prospect.archive_state.succeeded", {
-      userId,
-      prospectId,
-      archived,
-    });
-    revalidatePath("/prospects");
-    revalidatePath("/pipeline");
-    revalidatePath(`/prospects/${prospectId}`);
-    return {
-      status: "success",
-      message: archived ? "Prospect archived." : "Prospect restored.",
-    };
   } catch {
-    logger.error("prospect.archive_state.failed", { userId, prospectId });
+    safeErrorLog("prospect.archive_state.failed", { userId, prospectId });
     return { status: "error", message: "Unable to update prospect." };
   }
+
+  const ids = { userId, prospectId };
+  logMutationSuccess(
+    "prospect.archive_state.succeeded",
+    { ...ids, archived },
+    action,
+    ids
+  );
+  revalidateProspectPaths(
+    ["/prospects", "/pipeline", "/tasks", `/prospects/${prospectId}`, "/"],
+    action,
+    ids
+  );
+  return {
+    status: "success",
+    message: archived ? "Prospect archived." : "Prospect restored.",
+  };
 };
 
 export const archiveProspect = async (prospectId: string) =>

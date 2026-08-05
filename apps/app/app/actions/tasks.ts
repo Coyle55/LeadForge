@@ -25,6 +25,11 @@ interface TaskMutationIds {
   userId: string;
 }
 
+const ARCHIVED_PROSPECT_TASK_RESULT = {
+  message: "Archived prospects are read-only. Restore the prospect first.",
+  status: "error",
+} as const;
+
 const authorize = async () => {
   const { userId } = await auth();
   return userId && isAllowedUserId(userId) ? userId : null;
@@ -104,8 +109,11 @@ const logPersistenceFailure = (
 
 const getOwnedTask = async (taskId: string, userId: string) =>
   await database.task.findFirst({
-    where: { id: taskId, userId },
-    select: { prospectId: true },
+    where: { id: taskId, userId, prospect: { userId } },
+    select: {
+      prospectId: true,
+      prospect: { select: { archivedAt: true } },
+    },
   });
 
 export const createTask = async (
@@ -131,11 +139,14 @@ export const createTask = async (
   let ownedProspectId: string;
   try {
     const prospect = await database.prospect.findFirst({
-      where: { id: prospectId, userId, archivedAt: null },
-      select: { id: true },
+      where: { id: prospectId, userId },
+      select: { id: true, archivedAt: true },
     });
     if (!prospect) {
       return { status: "error", message: "Prospect not found." };
+    }
+    if (prospect.archivedAt) {
+      return ARCHIVED_PROSPECT_TASK_RESULT;
     }
 
     const task = await database.task.create({
@@ -187,9 +198,16 @@ export const updateTask = async (
     if (!task) {
       return { status: "error", message: "Task not found." };
     }
+    if (task.prospect.archivedAt) {
+      return ARCHIVED_PROSPECT_TASK_RESULT;
+    }
 
     const result = await database.task.updateMany({
-      where: { id: taskId, userId },
+      where: {
+        id: taskId,
+        userId,
+        prospect: { userId, archivedAt: null },
+      },
       data: parsed.data,
     });
     if (result.count === 0) {
@@ -222,12 +240,16 @@ const setTaskStatus = async (
     if (!task) {
       return { status: "error", message: "Task not found." };
     }
+    if (task.prospect.archivedAt) {
+      return ARCHIVED_PROSPECT_TASK_RESULT;
+    }
 
     const completing = action === "complete";
     const result = await database.task.updateMany({
       where: {
         id: taskId,
         userId,
+        prospect: { userId, archivedAt: null },
         status: completing ? "OPEN" : "COMPLETED",
       },
       data: completing
