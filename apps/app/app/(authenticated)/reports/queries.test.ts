@@ -3,14 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const prospectCountMock = vi.fn();
 const stageChangeFindManyMock = vi.fn();
 const dealFindManyMock = vi.fn();
-const dealCountMock = vi.fn();
 const taskFindManyMock = vi.fn();
 const websiteAuditFindManyMock = vi.fn();
 const outreachDraftFindManyMock = vi.fn();
 
 vi.mock("@repo/database", () => ({
   database: {
-    deal: { count: dealCountMock, findMany: dealFindManyMock },
+    deal: { findMany: dealFindManyMock },
     outreachDraft: { findMany: outreachDraftFindManyMock },
     pipelineStageChange: { findMany: stageChangeFindManyMock },
     prospect: { count: prospectCountMock },
@@ -27,7 +26,6 @@ describe("getReportsMetrics", () => {
     prospectCountMock.mockResolvedValue(0);
     stageChangeFindManyMock.mockResolvedValue([]);
     dealFindManyMock.mockResolvedValue([]);
-    dealCountMock.mockResolvedValue(0);
     taskFindManyMock.mockResolvedValue([]);
     websiteAuditFindManyMock.mockResolvedValue([]);
     outreachDraftFindManyMock.mockResolvedValue([]);
@@ -72,7 +70,20 @@ describe("getReportsMetrics", () => {
   });
 
   it("combines won deals and the most recent Lost transitions for win rate", async () => {
-    dealCountMock.mockResolvedValue(3);
+    dealFindManyMock.mockResolvedValue([
+      {
+        actualCloseDate: new Date("2026-08-01T12:00:00.000Z"),
+        valueCents: 10_000,
+      },
+      {
+        actualCloseDate: new Date("2026-07-15T12:00:00.000Z"),
+        valueCents: 20_000,
+      },
+      {
+        actualCloseDate: new Date("2026-06-01T12:00:00.000Z"),
+        valueCents: 30_000,
+      },
+    ]);
     stageChangeFindManyMock.mockImplementation(({ where }) => {
       if (where.toStage === "LOST") {
         return Promise.resolve([
@@ -107,5 +118,47 @@ describe("getReportsMetrics", () => {
     );
     expect(august?.valueCents).toBe(150_000);
     expect(july?.valueCents).toBe(0);
+  });
+
+  it("includes a deal closed earlier today even when `now`'s time-of-day precedes its noon-UTC close timestamp", async () => {
+    // actualCloseDate is stored as a date-only value at noon UTC (see
+    // packages/validation/pipeline.ts). If the won-deal query's upper bound
+    // were `lte: now` instead of the trend window's exclusive month end, a
+    // deal closed "today" would be excluded whenever /reports loads before
+    // that day's noon-UTC timestamp. `now` here is 08:00 UTC, two hours
+    // before the deal's actualCloseDate the same day.
+    const earlyMorningNow = new Date("2026-08-05T08:00:00.000Z");
+    const dealClosedAtNoonToday = {
+      actualCloseDate: new Date("2026-08-05T12:00:00.000Z"),
+      valueCents: 75_000,
+    };
+
+    dealFindManyMock.mockImplementation(({ where }) => {
+      const range = where.actualCloseDate as {
+        gte?: Date;
+        lt?: Date;
+        lte?: Date;
+      };
+      const { actualCloseDate } = dealClosedAtNoonToday;
+      if (range.gte && actualCloseDate < range.gte) {
+        return Promise.resolve([]);
+      }
+      if (range.lt && actualCloseDate >= range.lt) {
+        return Promise.resolve([]);
+      }
+      if (range.lte && actualCloseDate > range.lte) {
+        return Promise.resolve([]);
+      }
+      return Promise.resolve([dealClosedAtNoonToday]);
+    });
+    const { getReportsMetrics } = await import("./queries");
+
+    const metrics = await getReportsMetrics("user_owner", earlyMorningNow);
+
+    const august = metrics.revenueTrend.find(
+      (point) => point.month === "2026-08"
+    );
+    expect(august?.valueCents).toBe(75_000);
+    expect(metrics.winRate).toBe(1);
   });
 });

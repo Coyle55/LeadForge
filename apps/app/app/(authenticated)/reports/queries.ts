@@ -82,12 +82,12 @@ export const getReportsMetrics = async (
 ): Promise<ReportsMetrics> => {
   const months = getTrailingMonths(now, TREND_MONTH_COUNT);
   const windowStart = months[0].start;
+  const windowEnd = months.at(-1)?.end ?? now;
 
   const [
     funnelCounts,
     reachedCounts,
     wonDeals,
-    wonCountInWindow,
     lostDates,
     createdTasks,
     completedTasks,
@@ -110,16 +110,13 @@ export const getReportsMetrics = async (
       where: {
         userId,
         prospect: { pipelineStage: "WON" },
-        actualCloseDate: { gte: windowStart, lte: now },
+        // Bound by the month bucket's exclusive end, not the exact instant
+        // `now`, since `actualCloseDate` is stored as a date-only value at
+        // noon UTC: a deal closed "today" must not disappear just because
+        // the page loaded before that day's noon-UTC timestamp.
+        actualCloseDate: { gte: windowStart, lt: windowEnd },
       },
       select: { actualCloseDate: true, valueCents: true },
-    }),
-    database.deal.count({
-      where: {
-        userId,
-        prospect: { pipelineStage: "WON" },
-        actualCloseDate: { gte: windowStart, lte: now },
-      },
     }),
     getMostRecentLostDates(userId),
     database.task.findMany({
@@ -164,6 +161,7 @@ export const getReportsMetrics = async (
     };
   });
 
+  const wonCountInWindow = wonDeals.length;
   const lostCountInWindow = lostDates.filter(
     (date) => date >= windowStart && date <= now
   ).length;

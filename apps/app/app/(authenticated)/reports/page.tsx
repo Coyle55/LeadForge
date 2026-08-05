@@ -9,6 +9,7 @@ import {
 
 import { FunnelChart } from "./funnel-chart";
 import { getReportsMetrics } from "./queries";
+import { RevenueTrendChart } from "./revenue-trend-chart";
 import { TrendChart } from "./trend-chart";
 
 const ReportsPage = async () => {
@@ -56,19 +57,9 @@ const ReportsPage = async () => {
               ? "—"
               : `${Math.round(metrics.winRate * 100)}%`}
           </p>
-          <TrendChart
-            data={metrics.revenueTrend.map((point) => ({
-              ...point,
-              valueCents: point.valueCents / 100,
-            }))}
+          <RevenueTrendChart
+            data={metrics.revenueTrend}
             emptyMessage="No closed deals yet in the last 12 months."
-            series={[
-              {
-                color: "var(--chart-1)",
-                dataKey: "valueCents",
-                label: "Won revenue",
-              },
-            ]}
           />
         </CardContent>
       </Card>

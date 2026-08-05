@@ -29,6 +29,13 @@ export const hasFunnelData = (
   terminalTotals.won > 0 ||
   terminalTotals.lost > 0;
 
+// Skipped-stage moves and prospects created before the M6 pipeline-history
+// log shipped can push the raw `reached(B) / reached(A)` ratio above 1;
+// clamp the *displayed* value only (see ADR 0007) — the stored rate itself
+// is left unclamped for anyone reading the data directly.
+export const formatConversionRate = (rate: number | null): string =>
+  rate === null ? "—" : `${Math.min(100, Math.round(rate * 100))}%`;
+
 export const FunnelChart = ({
   conversionRates,
   funnel,
@@ -74,9 +81,7 @@ export const FunnelChart = ({
               {STAGE_LABELS[conversion.from]} → {STAGE_LABELS[conversion.to]}
             </dt>
             <dd className="font-mono font-semibold text-lg tabular-nums">
-              {conversion.rate === null
-                ? "—"
-                : `${Math.round(conversion.rate * 100)}%`}
+              {formatConversionRate(conversion.rate)}
             </dd>
           </div>
         ))}

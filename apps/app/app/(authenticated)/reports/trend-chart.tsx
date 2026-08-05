@@ -8,6 +8,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@repo/design-system/components/ui/chart";
+import type { ComponentProps } from "react";
 import { CartesianGrid, Line, LineChart, XAxis } from "recharts";
 
 import { ReportsEmptyState } from "./empty-state";
@@ -17,6 +18,13 @@ export interface TrendSeries {
   dataKey: string;
   label: string;
 }
+
+// Mirrors ChartTooltipContent's `formatter` prop so chart-specific instances
+// (e.g. the revenue trend) can render currency-formatted tooltip values
+// without hardcoding that formatting into this generic component.
+export type TrendTooltipFormatter = ComponentProps<
+  typeof ChartTooltipContent
+>["formatter"];
 
 export const hasTrendData = <T extends object>(
   data: T[],
@@ -30,10 +38,12 @@ export const TrendChart = <T extends object>({
   data,
   emptyMessage,
   series,
+  tooltipFormatter,
 }: {
   data: T[];
   emptyMessage: string;
   series: TrendSeries[];
+  tooltipFormatter?: TrendTooltipFormatter;
 }) => {
   if (
     !hasTrendData(
@@ -61,7 +71,9 @@ export const TrendChart = <T extends object>({
           tickLine={false}
           tickMargin={8}
         />
-        <ChartTooltip content={<ChartTooltipContent />} />
+        <ChartTooltip
+          content={<ChartTooltipContent formatter={tooltipFormatter} />}
+        />
         <ChartLegend content={<ChartLegendContent />} />
         {series.map((line) => (
           <Line
