@@ -15,7 +15,7 @@ import { getLatestProspectAudit } from "../../audits/queries";
 import { RunAuditButton } from "../../audits/run-audit-button";
 import { getProspectPipelineDetail } from "../../pipeline/queries";
 import { getProspectTasks } from "../../tasks/queries";
-import { ProspectForm } from "../prospect-form";
+import { BUSINESS_CATEGORY_OPTIONS, ProspectForm } from "../prospect-form";
 import { StatusButton } from "../status-button";
 import { PipelineDealForm } from "./pipeline-deal-form";
 import { TaskForm } from "./task-form";
@@ -23,6 +23,10 @@ import { TaskList } from "./task-list";
 
 const humanizePipelineStage = (stage: string) =>
   stage.charAt(0) + stage.slice(1).toLowerCase();
+
+const businessCategoryLabel = (category: string | null) =>
+  BUSINESS_CATEGORY_OPTIONS.find(([value]) => value === category)?.[1] ??
+  "Not set";
 
 const ArchivedNotice = () => (
   <div className="flex gap-3 rounded-xl border border-amber-500/25 bg-amber-500/[0.06] p-4">
@@ -45,6 +49,12 @@ const ReadOnlyBusinessDetails = ({ prospect }: { prospect: Prospect }) => (
     <div className="sm:col-span-2">
       <dt className="text-muted-foreground text-xs">Business</dt>
       <dd className="mt-1 font-medium">{prospect.businessName}</dd>
+    </div>
+    <div>
+      <dt className="text-muted-foreground text-xs">Business category</dt>
+      <dd className="mt-1">
+        {businessCategoryLabel(prospect.businessCategory)}
+      </dd>
     </div>
     <div>
       <dt className="text-muted-foreground text-xs">Website</dt>
@@ -98,6 +108,7 @@ const BusinessDetailsCard = ({
 }) => {
   const initial = {
     businessName: prospect.businessName,
+    businessCategory: prospect.businessCategory ?? "",
     contactEmail: prospect.contactEmail ?? "",
     contactName: prospect.contactName ?? "",
     location: prospect.location ?? "",

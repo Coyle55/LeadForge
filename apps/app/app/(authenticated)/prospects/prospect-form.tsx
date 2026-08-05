@@ -1,5 +1,6 @@
 "use client";
 
+import type { BusinessCategory } from "@repo/database";
 import { Button } from "@repo/design-system/components/ui/button";
 import { Input } from "@repo/design-system/components/ui/input";
 import { Label } from "@repo/design-system/components/ui/label";
@@ -12,6 +13,7 @@ import {
 } from "../../actions/prospects";
 
 interface Fields {
+  businessCategory: string;
   businessName: string;
   contactEmail: string;
   contactName: string;
@@ -20,6 +22,19 @@ interface Fields {
   phone: string;
   websiteUrl: string;
 }
+
+export const BUSINESS_CATEGORY_OPTIONS = [
+  ["SALON_SPA", "Salon / Spa"],
+  ["MEDICAL_DENTAL", "Medical / Dental"],
+  ["HOME_SERVICES", "Home Services"],
+  ["AUTOMOTIVE", "Automotive"],
+  ["FITNESS", "Fitness"],
+  ["LEGAL_FINANCIAL", "Legal / Financial"],
+  ["RESTAURANT_FOOD", "Restaurant / Food"],
+  ["RETAIL", "Retail"],
+  ["PROFESSIONAL_SERVICES", "Professional Services"],
+  ["OTHER", "Other"],
+] as const satisfies ReadonlyArray<readonly [BusinessCategory, string]>;
 
 const FieldError = ({ errors }: { errors?: string[] }) =>
   errors?.[0] ? <p className="text-destructive text-xs">{errors[0]}</p> : null;
@@ -63,6 +78,23 @@ export const ProspectForm = ({
         {field("contactName", "Contact name")}
         {field("contactEmail", "Contact email", "email")}
         {field("phone", "Phone", "tel")}
+        <div className="space-y-2">
+          <Label htmlFor="businessCategory">Business category</Label>
+          <select
+            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:bg-input/30"
+            defaultValue={initial.businessCategory}
+            id="businessCategory"
+            name="businessCategory"
+          >
+            <option value="">Not set</option>
+            {BUSINESS_CATEGORY_OPTIONS.map(([value, label]) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+          <FieldError errors={state.fieldErrors?.businessCategory} />
+        </div>
       </div>
       <div className="space-y-2">
         <Label htmlFor="notes">Notes</Label>
