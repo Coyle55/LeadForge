@@ -18,28 +18,79 @@ model User {
   updatedAt   DateTime @updatedAt
 }
 
-enum ProspectStatus {
+enum PipelineStage {
   NEW
-  QUALIFIED
-  ARCHIVED
+  CONTACTED
+  INTERESTED
+  PROPOSAL
+  WON
+  LOST
 }
 
 model Prospect {
-  id           String         @id @default(cuid())
-  userId       String
-  businessName String
-  websiteUrl   String?
-  contactName  String?
-  contactEmail String?
-  phone        String?
-  location     String?
-  notes        String?
-  status       ProspectStatus @default(NEW)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  id            String        @id @default(cuid())
+  userId        String
+  businessName  String
+  websiteUrl    String?
+  contactName   String?
+  contactEmail  String?
+  phone         String?
+  location      String?
+  notes         String?
+  pipelineStage PipelineStage @default(NEW)
+  archivedAt    DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  deal          Deal?
+  tasks         Task[]
 
-  @@index([userId, status])
+  @@index([userId, archivedAt])
+  @@index([userId, pipelineStage])
   @@index([userId, createdAt])
+}
+
+model Deal {
+  id                String    @id @default(cuid())
+  userId            String
+  prospectId        String    @unique
+  valueCents        Int?
+  expectedCloseDate DateTime?
+  actualCloseDate   DateTime?
+  lossReason        String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  prospect          Prospect  @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expectedCloseDate])
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum TaskStatus {
+  OPEN
+  COMPLETED
+}
+
+model Task {
+  id          String       @id @default(cuid())
+  userId      String
+  prospectId  String
+  title       String
+  dueAt       DateTime
+  priority    TaskPriority @default(MEDIUM)
+  status      TaskStatus   @default(OPEN)
+  completedAt DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  prospect    Prospect     @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, dueAt])
+  @@index([userId, prospectId, status, dueAt])
+  @@index([userId, priority, status])
 }
 
 enum WebsiteAuditStatus {
