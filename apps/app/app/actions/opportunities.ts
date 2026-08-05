@@ -166,12 +166,17 @@ const persistAnalysisFailure = async (
 // can start an analysis: auth/authorization, the completed audit, the
 // configured model, and the associated prospect. Also redirects (via a
 // thrown NEXT_REDIRECT, same as the original inline check) to an existing
-// in-flight analysis instead of starting a duplicate. Returns an error
-// result on any failed check so the caller can return it unchanged.
+// in-flight analysis instead of starting a duplicate. The "duplicate" kind
+// exists so the caller can return `undefined` (matching the original
+// inline `redirect(...); return;`) without relying solely on redirect()
+// throwing to stop execution.
 const resolveAnalysisContext = async (auditId: string) => {
   const { userId } = await auth();
   if (!(userId && isAllowedUserId(userId))) {
-    return { error: { status: "error" as const, message: "Not authorized." } };
+    return {
+      kind: "error" as const,
+      error: { status: "error" as const, message: "Not authorized." },
+    };
   }
   const audit = await database.websiteAudit.findFirst({
     where: { id: auditId, userId, status: "COMPLETED" },
@@ -179,6 +184,7 @@ const resolveAnalysisContext = async (auditId: string) => {
   });
   if (!audit) {
     return {
+      kind: "error" as const,
       error: {
         status: "error" as const,
         message: "Completed audit not found.",
@@ -188,6 +194,7 @@ const resolveAnalysisContext = async (auditId: string) => {
   const model = env.AI_GATEWAY_MODEL;
   if (!model) {
     return {
+      kind: "error" as const,
       error: {
         status: "error" as const,
         message: failureMessages.MODEL_NOT_CONFIGURED,
@@ -200,6 +207,7 @@ const resolveAnalysisContext = async (auditId: string) => {
   });
   if (!prospect) {
     return {
+      kind: "error" as const,
       error: {
         status: "error" as const,
         message: "Completed audit not found.",
@@ -217,16 +225,25 @@ const resolveAnalysisContext = async (auditId: string) => {
   });
   if (recent) {
     redirect(`/opportunities/${recent.id}`);
+    // redirect() is typed `never` and always throws NEXT_REDIRECT in
+    // production, so this line normally never runs. It exists as an
+    // explicit stop so a mocked/no-op redirect() (as in tests, or any
+    // future environment where it doesn't throw) can't fall through and
+    // let the caller create a duplicate in-flight analysis.
+    return { kind: "duplicate" as const };
   }
-  return { context: { userId, audit, model, prospect } };
+  return { kind: "ok" as const, context: { userId, audit, model, prospect } };
 };
 
 export const analyzeAuditOpportunity = async (
   auditId: string
 ): Promise<{ status: "error"; message: string } | undefined> => {
   const resolved = await resolveAnalysisContext(auditId);
-  if ("error" in resolved) {
+  if (resolved.kind === "error") {
     return resolved.error;
+  }
+  if (resolved.kind === "duplicate") {
+    return;
   }
   const { userId, audit, model, prospect } = resolved.context;
   let analysis: { id: string };

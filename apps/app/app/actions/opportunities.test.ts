@@ -276,6 +276,32 @@ describe("analyzeAuditOpportunity", () => {
     expect(redirectMock).toHaveBeenCalledWith("/opportunities/analysis_1");
   });
 
+  it("redirects to an existing in-flight analysis instead of starting a duplicate", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    auditFindMock.mockResolvedValue(audit);
+    prospectFindMock.mockResolvedValue({
+      businessName: "Acme",
+      businessCategory: null,
+    });
+    // The default `analysisFindMock.mockResolvedValue(null)` from
+    // beforeEach is overridden just for this call, simulating a
+    // still-RUNNING analysis created within the last 5 minutes.
+    analysisFindMock.mockResolvedValueOnce({ id: "analysis_running" });
+    const { analyzeAuditOpportunity } = await import("./opportunities");
+    const result = await analyzeAuditOpportunity("audit_1");
+
+    expect(redirectMock).toHaveBeenCalledWith(
+      "/opportunities/analysis_running"
+    );
+    // The duplicate-check short-circuit must stop execution before a new
+    // analysis row (or anything downstream of it) is ever created — this
+    // is the exact regression the explicit early return guards against.
+    expect(analysisCreateMock).not.toHaveBeenCalled();
+    expect(generateMock).not.toHaveBeenCalled();
+    expect(transactionMock).not.toHaveBeenCalled();
+    expect(result).toBeUndefined();
+  });
+
   it("marks a genuine persistence failure as FAILED, distinct from an interpretation failure", async () => {
     authMock.mockResolvedValue({ userId: "user_owner" });
     auditFindMock.mockResolvedValue(audit);
