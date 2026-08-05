@@ -180,3 +180,33 @@ export const dateToZonedLocalInput = (value: Date): string => {
     parts.hour
   )}:${pad(parts.minute)}`;
 };
+
+const isWeekendDay = (year: number, month: number, day: number) => {
+  const dayOfWeek = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+  return dayOfWeek === 0 || dayOfWeek === 6;
+};
+
+export const addBusinessDays = (start: Date, businessDays: number): Date => {
+  const startParts = getZonedParts(start);
+  let calendarDay: Pick<LocalDateTimeParts, "year" | "month" | "day"> = {
+    year: startParts.year,
+    month: startParts.month,
+    day: startParts.day,
+  };
+
+  let remaining = businessDays;
+  while (remaining > 0) {
+    calendarDay = addLocalDays(calendarDay, 1);
+    if (!isWeekendDay(calendarDay.year, calendarDay.month, calendarDay.day)) {
+      remaining -= 1;
+    }
+  }
+
+  return resolveLocalDateTime({
+    ...calendarDay,
+    hour: startParts.hour,
+    minute: startParts.minute,
+    second: startParts.second,
+    millisecond: startParts.millisecond,
+  });
+};
