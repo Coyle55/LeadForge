@@ -38,14 +38,14 @@ The authenticated application routes are:
 - `/pipeline` — six-stage active-prospect pipeline and explicit stage controls
 - `/tasks` — filterable owner-scoped follow-up queue
 - `/prospects` — searchable, archive- and pipeline-stage-filtered prospect list
-- `/prospects/new` — create a prospect
-- `/prospects/[id]` — edit, archive, or restore an owned prospect
+- `/prospects/new` — create a prospect, including an optional manually-selected business category
+- `/prospects/[id]` — edit (including business category), archive, or restore an owned prospect
 - `/audits` — owner-scoped website audit history
 - `/audits/[id]` — grouped audit evidence and rerun controls
 - `/opportunities` — completed and failed opportunity-analysis history
 - `/opportunities/[id]` — evidence-linked score and recommendations
 - `/outreach` — completed and failed outreach-draft history
-- `/outreach/[id]` — edit, copy, or reset an evidence-grounded draft
+- `/outreach/[id]` — edit, copy, reset, or mark an evidence-grounded draft sent (recording `lastContactedAt`, a `ProspectActivity` entry, and an optional follow-up task)
 - `/settings` — update the owner's display name and Outreach Profile
 
 ## Commands
