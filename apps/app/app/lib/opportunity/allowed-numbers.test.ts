@@ -63,9 +63,15 @@ describe("buildAllowedNumbers", () => {
     const result = buildAllowedNumbers(scoring, recommendations);
     const expected = [
       "72", // overallScore
-      "80", "70", "60", "50", "40", // categoryScores
-      "15", "1", // scoringBreakdown points
-      "5", "3", // recommendation weights
+      "80",
+      "70",
+      "60",
+      "50",
+      "40", // categoryScores
+      "15",
+      "1", // scoringBreakdown points
+      "5",
+      "3", // recommendation weights
     ];
     for (const value of expected) {
       expect(result).toContain(value);

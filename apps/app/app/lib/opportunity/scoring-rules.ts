@@ -1,8 +1,8 @@
 export type CheckStatus = "PASS" | "WARNING" | "FAIL";
 
 export interface PointRule {
-  warning?: number;
   fail?: number;
+  warning?: number;
 }
 
 export const CATEGORY_CAPS: Record<string, number> = {
@@ -20,7 +20,10 @@ export const CATEGORY_CAPS: Record<string, number> = {
 // fail value (8) already equals the base cap (8), so doubling the raw
 // points before capping would have zero effect on overallScore — the cap
 // must scale with the multiplier for it to mean anything.
-export const getCategoryCap = (category: string, isAppointmentDriven: boolean): number =>
+export const getCategoryCap = (
+  category: string,
+  isAppointmentDriven: boolean
+): number =>
   category === "BOOKING" && isAppointmentDriven ? 16 : CATEGORY_CAPS[category];
 
 export const CATEGORY_MAX_POSSIBLE: Record<string, number> = {
@@ -79,8 +82,10 @@ export const BOOKING_WEIGHT_MULTIPLIER = 2;
 
 export interface NegativeModifierRule {
   category: string;
+  matches: (
+    checksByKey: Map<string, { status: CheckStatus; evidence: unknown }>
+  ) => boolean;
   points: number;
-  matches: (checksByKey: Map<string, { status: CheckStatus; evidence: unknown }>) => boolean;
 }
 
 export const NEGATIVE_MODIFIERS: NegativeModifierRule[] = [

@@ -133,7 +133,10 @@ export const analyzeAuditOpportunity = async (
         disqualifiers: scoringResult.disqualifiers,
       });
     } else {
-      const allowedNumbers = buildAllowedNumbers(scoringResult, recommendations);
+      const allowedNumbers = buildAllowedNumbers(
+        scoringResult,
+        recommendations
+      );
       const expectedServiceCategories = recommendations.map(
         (candidate) => candidate.serviceCategory
       );
@@ -156,9 +159,13 @@ export const analyzeAuditOpportunity = async (
         expectedServiceCategories,
       };
 
-      let generated: Awaited<ReturnType<typeof generateInterpretation>> | undefined;
+      let generated:
+        | Awaited<ReturnType<typeof generateInterpretation>>
+        | undefined;
       try {
-        generated = await generateInterpretation(interpretationInput, { model });
+        generated = await generateInterpretation(interpretationInput, {
+          model,
+        });
       } catch (error) {
         if (!(error instanceof InterpretationGenerationError)) {
           throw error;

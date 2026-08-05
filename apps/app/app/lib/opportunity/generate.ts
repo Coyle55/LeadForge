@@ -1,9 +1,13 @@
 import { generateText, Output } from "ai";
 import { INTERPRETATION_SYSTEM_PROMPT } from "./prompt";
-import { interpretationOutputSchema, validateInterpretationOutput } from "./schema";
+import {
+  interpretationOutputSchema,
+  validateInterpretationOutput,
+} from "./schema";
 
 const timeoutPattern = /timeout|abort/i;
-const invalidOutputPattern = /unlisted number|zod|validation|expected service categories/i;
+const invalidOutputPattern =
+  /unlisted number|zod|validation|expected service categories/i;
 
 export type InterpretationGenerationFailure =
   | "RATE_LIMITED"
@@ -37,7 +41,9 @@ export const generateInterpretation = async (
   const now = options.now ?? Date.now;
   const started = now();
   try {
-    const result = await (options.generate ?? (generateText as unknown as Generator))({
+    const result = await (
+      options.generate ?? (generateText as unknown as Generator)
+    )({
       model: options.model,
       output: Output.object({ schema: interpretationOutputSchema }),
       system: INTERPRETATION_SYSTEM_PROMPT,
@@ -62,13 +68,24 @@ export const generateInterpretation = async (
     if (error instanceof InterpretationGenerationError) {
       throw error;
     }
-    if (typeof error === "object" && error && "statusCode" in error && error.statusCode === 429) {
+    if (
+      typeof error === "object" &&
+      error &&
+      "statusCode" in error &&
+      error.statusCode === 429
+    ) {
       throw new InterpretationGenerationError("RATE_LIMITED");
     }
-    if (error instanceof Error && timeoutPattern.test(`${error.name} ${error.message}`)) {
+    if (
+      error instanceof Error &&
+      timeoutPattern.test(`${error.name} ${error.message}`)
+    ) {
       throw new InterpretationGenerationError("TIMEOUT");
     }
-    if (error instanceof Error && invalidOutputPattern.test(`${error.name} ${error.message}`)) {
+    if (
+      error instanceof Error &&
+      invalidOutputPattern.test(`${error.name} ${error.message}`)
+    ) {
       throw new InterpretationGenerationError("INVALID_OUTPUT");
     }
     throw new InterpretationGenerationError("GATEWAY_ERROR");

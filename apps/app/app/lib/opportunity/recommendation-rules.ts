@@ -9,7 +9,10 @@ export type ServiceCategory =
 
 export const RECOMMENDATION_THRESHOLD = 3;
 
-export const SERVICE_EFFORT: Record<ServiceCategory, "HIGH" | "MEDIUM" | "LOW"> = {
+export const SERVICE_EFFORT: Record<
+  ServiceCategory,
+  "HIGH" | "MEDIUM" | "LOW"
+> = {
   WEBSITE_REDESIGN: "HIGH",
   PERFORMANCE_OPTIMIZATION: "MEDIUM",
   BOOKING_INTEGRATION: "MEDIUM",
@@ -24,19 +27,71 @@ interface SignalRule {
 }
 
 export const SIGNAL_RULES: SignalRule[] = [
-  { checkKey: "calls_to_action", service: "WEBSITE_REDESIGN", statuses: { WARNING: 2, FAIL: 3 } },
-  { checkKey: "viewport_meta", service: "WEBSITE_REDESIGN", statuses: { FAIL: 3 } },
-  { checkKey: "broken_internal_links", service: "WEBSITE_REDESIGN", statuses: { FAIL: 2 } },
-  { checkKey: "broken_images", service: "WEBSITE_REDESIGN", statuses: { FAIL: 1 } },
-  { checkKey: "mixed_content", service: "WEBSITE_REDESIGN", statuses: { FAIL: 1 } },
-  { checkKey: "server_response_time", service: "PERFORMANCE_OPTIMIZATION", statuses: { WARNING: 2, FAIL: 3 } },
-  { checkKey: "render_blocking_resources", service: "PERFORMANCE_OPTIMIZATION", statuses: { FAIL: 1 } },
-  { checkKey: "html_size", service: "PERFORMANCE_OPTIMIZATION", statuses: { FAIL: 1 } },
-  { checkKey: "script_count", service: "PERFORMANCE_OPTIMIZATION", statuses: { FAIL: 1 } },
-  { checkKey: "booking_detection", service: "BOOKING_INTEGRATION", statuses: { FAIL: 3 } },
-  { checkKey: "contact_path", service: "LEAD_CAPTURE_REPAIR", statuses: { FAIL: 2 } },
-  { checkKey: "phone_detection", service: "LEAD_CAPTURE_REPAIR", statuses: { FAIL: 2 } },
-  { checkKey: "email_detection", service: "LEAD_CAPTURE_REPAIR", statuses: { FAIL: 1 } },
+  {
+    checkKey: "calls_to_action",
+    service: "WEBSITE_REDESIGN",
+    statuses: { WARNING: 2, FAIL: 3 },
+  },
+  {
+    checkKey: "viewport_meta",
+    service: "WEBSITE_REDESIGN",
+    statuses: { FAIL: 3 },
+  },
+  {
+    checkKey: "broken_internal_links",
+    service: "WEBSITE_REDESIGN",
+    statuses: { FAIL: 2 },
+  },
+  {
+    checkKey: "broken_images",
+    service: "WEBSITE_REDESIGN",
+    statuses: { FAIL: 1 },
+  },
+  {
+    checkKey: "mixed_content",
+    service: "WEBSITE_REDESIGN",
+    statuses: { FAIL: 1 },
+  },
+  {
+    checkKey: "server_response_time",
+    service: "PERFORMANCE_OPTIMIZATION",
+    statuses: { WARNING: 2, FAIL: 3 },
+  },
+  {
+    checkKey: "render_blocking_resources",
+    service: "PERFORMANCE_OPTIMIZATION",
+    statuses: { FAIL: 1 },
+  },
+  {
+    checkKey: "html_size",
+    service: "PERFORMANCE_OPTIMIZATION",
+    statuses: { FAIL: 1 },
+  },
+  {
+    checkKey: "script_count",
+    service: "PERFORMANCE_OPTIMIZATION",
+    statuses: { FAIL: 1 },
+  },
+  {
+    checkKey: "booking_detection",
+    service: "BOOKING_INTEGRATION",
+    statuses: { FAIL: 3 },
+  },
+  {
+    checkKey: "contact_path",
+    service: "LEAD_CAPTURE_REPAIR",
+    statuses: { FAIL: 2 },
+  },
+  {
+    checkKey: "phone_detection",
+    service: "LEAD_CAPTURE_REPAIR",
+    statuses: { FAIL: 2 },
+  },
+  {
+    checkKey: "email_detection",
+    service: "LEAD_CAPTURE_REPAIR",
+    statuses: { FAIL: 1 },
+  },
 ];
 
 // Weight is 3 (not 2) so this signal independently clears

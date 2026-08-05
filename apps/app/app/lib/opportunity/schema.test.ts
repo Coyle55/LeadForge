@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { validateInterpretationOutput } from "./schema";
 
-const allowedNumbers = new Set(["0", "1", "2", "100", "72", "60", "80", "70", "75", "65", "15", "5"]);
+const allowedNumbers = new Set([
+  "0",
+  "1",
+  "2",
+  "100",
+  "72",
+  "60",
+  "80",
+  "70",
+  "75",
+  "65",
+  "15",
+  "5",
+]);
 const expectedServiceCategories = ["LEAD_CAPTURE_REPAIR"];
 
 const valid = {
@@ -19,7 +32,8 @@ const valid = {
       title: "Repair your lead-capture path",
       rationale:
         "The contact-path check failed, which limits clear conversion routes for visitors.",
-      action: "Add a prominent, working contact action to the header and service pages.",
+      action:
+        "Add a prominent, working contact action to the header and service pages.",
     },
   ],
 };
@@ -27,7 +41,11 @@ const valid = {
 describe("validateInterpretationOutput", () => {
   it("accepts prose whose numbers are all present in allowedNumbers and whose recommendations exactly match", () => {
     expect(
-      validateInterpretationOutput(valid, allowedNumbers, expectedServiceCategories)
+      validateInterpretationOutput(
+        valid,
+        allowedNumbers,
+        expectedServiceCategories
+      )
     ).toEqual(valid);
   });
 
@@ -47,7 +65,11 @@ describe("validateInterpretationOutput", () => {
       summary: `${valid.summary} Traffic could rise 4200%.`,
     };
     expect(() =>
-      validateInterpretationOutput(withInventedNumber, allowedNumbers, expectedServiceCategories)
+      validateInterpretationOutput(
+        withInventedNumber,
+        allowedNumbers,
+        expectedServiceCategories
+      )
     ).toThrow(/unlisted number/i);
   });
 
@@ -55,11 +77,18 @@ describe("validateInterpretationOutput", () => {
     const withInventedNumber = {
       ...valid,
       recommendations: [
-        { ...valid.recommendations[0], action: `${valid.recommendations[0].action} Expect a 4200% lift.` },
+        {
+          ...valid.recommendations[0],
+          action: `${valid.recommendations[0].action} Expect a 4200% lift.`,
+        },
       ],
     };
     expect(() =>
-      validateInterpretationOutput(withInventedNumber, allowedNumbers, expectedServiceCategories)
+      validateInterpretationOutput(
+        withInventedNumber,
+        allowedNumbers,
+        expectedServiceCategories
+      )
     ).toThrow(/unlisted number/i);
   });
 
@@ -69,7 +98,11 @@ describe("validateInterpretationOutput", () => {
       practicalImpact: `${valid.practicalImpact} This affects roughly 72% of the experience.`,
     };
     expect(
-      validateInterpretationOutput(withPercent, allowedNumbers, expectedServiceCategories)
+      validateInterpretationOutput(
+        withPercent,
+        allowedNumbers,
+        expectedServiceCategories
+      )
     ).toEqual(withPercent);
   });
 
@@ -91,13 +124,18 @@ describe("validateInterpretationOutput", () => {
         {
           serviceCategory: "PERFORMANCE_OPTIMIZATION" as const,
           title: "Speed up key pages",
-          rationale: "Server response time checks show room to improve load speed.",
+          rationale:
+            "Server response time checks show room to improve load speed.",
           action: "Optimize the slowest server responses on key landing pages.",
         },
       ],
     };
     expect(() =>
-      validateInterpretationOutput(withExtra, allowedNumbers, expectedServiceCategories)
+      validateInterpretationOutput(
+        withExtra,
+        allowedNumbers,
+        expectedServiceCategories
+      )
     ).toThrow(/expected service categories/i);
   });
 
@@ -105,11 +143,18 @@ describe("validateInterpretationOutput", () => {
     const withWrongCategory = {
       ...valid,
       recommendations: [
-        { ...valid.recommendations[0], serviceCategory: "BOOKING_INTEGRATION" as const },
+        {
+          ...valid.recommendations[0],
+          serviceCategory: "BOOKING_INTEGRATION" as const,
+        },
       ],
     };
     expect(() =>
-      validateInterpretationOutput(withWrongCategory, allowedNumbers, expectedServiceCategories)
+      validateInterpretationOutput(
+        withWrongCategory,
+        allowedNumbers,
+        expectedServiceCategories
+      )
     ).toThrow(/expected service categories/i);
   });
 
@@ -119,7 +164,11 @@ describe("validateInterpretationOutput", () => {
       recommendations: [valid.recommendations[0], valid.recommendations[0]],
     };
     expect(() =>
-      validateInterpretationOutput(duplicated, allowedNumbers, expectedServiceCategories)
+      validateInterpretationOutput(
+        duplicated,
+        allowedNumbers,
+        expectedServiceCategories
+      )
     ).toThrow(/expected service categories/i);
   });
 

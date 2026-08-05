@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { generateInterpretation, InterpretationGenerationError } from "./generate";
+import {
+  generateInterpretation,
+  InterpretationGenerationError,
+} from "./generate";
 import { INTERPRETATION_PROMPT_VERSION } from "./prompt";
 
 const input = {
@@ -32,7 +35,20 @@ const input = {
       supportingCheckKeys: ["contact_path"],
     },
   ],
-  allowedNumbers: ["0", "1", "2", "100", "72", "60", "80", "70", "75", "65", "15", "5"],
+  allowedNumbers: [
+    "0",
+    "1",
+    "2",
+    "100",
+    "72",
+    "60",
+    "80",
+    "70",
+    "75",
+    "65",
+    "15",
+    "5",
+  ],
   expectedServiceCategories: ["LEAD_CAPTURE_REPAIR"],
 };
 
@@ -51,7 +67,8 @@ const output = {
       title: "Repair your lead-capture path",
       rationale:
         "The contact-path check failed, which limits clear conversion routes for visitors.",
-      action: "Add a prominent, working contact action to the header and service pages.",
+      action:
+        "Add a prominent, working contact action to the header and service pages.",
     },
   ],
 };

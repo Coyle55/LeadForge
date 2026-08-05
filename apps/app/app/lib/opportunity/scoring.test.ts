@@ -11,11 +11,16 @@ const check = (
 describe("computeOpportunityScore", () => {
   it("is a pure function: identical inputs produce identical output", () => {
     const input = {
-      checks: [check("https", "TRUST", "FAIL"), check("http_status", "TECHNICAL", "PASS")],
+      checks: [
+        check("https", "TRUST", "FAIL"),
+        check("http_status", "TECHNICAL", "PASS"),
+      ],
       pagesAudited: 3,
       businessCategory: null,
     };
-    expect(computeOpportunityScore(input)).toEqual(computeOpportunityScore(input));
+    expect(computeOpportunityScore(input)).toEqual(
+      computeOpportunityScore(input)
+    );
   });
 
   it("caps accessibility and SEO so cosmetic findings alone cannot reach a competitive tier", () => {
@@ -88,7 +93,11 @@ describe("computeOpportunityScore", () => {
   });
 
   it("flags AUDIT_INCOMPLETE and skips scoring when no pages were audited", () => {
-    const result = computeOpportunityScore({ checks: [], pagesAudited: 0, businessCategory: null });
+    const result = computeOpportunityScore({
+      checks: [],
+      pagesAudited: 0,
+      businessCategory: null,
+    });
     expect(result.disqualifiers).toContain("AUDIT_INCOMPLETE");
     expect(result.overallScore).toBe(0);
     expect(result.scoringBreakdown).toEqual([]);

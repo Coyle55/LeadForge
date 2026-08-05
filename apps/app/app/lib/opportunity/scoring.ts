@@ -3,10 +3,10 @@ import {
   BOOKING_WEIGHT_MULTIPLIER,
   CATEGORY_CAPS,
   CATEGORY_MAX_POSSIBLE,
+  type CheckStatus,
   getCategoryCap,
   NEGATIVE_MODIFIERS,
   POINT_TABLE,
-  type CheckStatus,
 } from "./scoring-rules";
 
 export type Tier = "EXCELLENT" | "HIGH" | "MEDIUM" | "LOW";
@@ -99,16 +99,26 @@ export const computeOpportunityScore = (input: ScoringInput): ScoringResult => {
       continue;
     }
     let points =
-      check.status === "FAIL" ? (rule.fail ?? 0) : check.status === "WARNING" ? (rule.warning ?? 0) : 0;
+      check.status === "FAIL"
+        ? (rule.fail ?? 0)
+        : check.status === "WARNING"
+          ? (rule.warning ?? 0)
+          : 0;
     if (points === 0) {
       continue;
     }
     if (check.key === "booking_detection" && isAppointmentDriven) {
       points *= BOOKING_WEIGHT_MULTIPLIER;
     }
-    rawByCategory[check.category] = (rawByCategory[check.category] ?? 0) + points;
+    rawByCategory[check.category] =
+      (rawByCategory[check.category] ?? 0) + points;
     breakdown.push({ checkKey: check.key, category: check.category, points });
-    topReasons.push({ checkKey: check.key, category: check.category, points, evidence: check.evidence });
+    topReasons.push({
+      checkKey: check.key,
+      category: check.category,
+      points,
+      evidence: check.evidence,
+    });
   }
 
   for (const modifier of NEGATIVE_MODIFIERS) {
@@ -125,8 +135,14 @@ export const computeOpportunityScore = (input: ScoringInput): ScoringResult => {
   for (const category of Object.keys(CATEGORY_CAPS)) {
     const raw = rawByCategory[category] ?? 0;
     const maxPossible = CATEGORY_MAX_POSSIBLE[category] ?? 1;
-    categoryScores[category.toLowerCase()] = Math.min(100, Math.round((raw / maxPossible) * 100));
-    overallScore += Math.min(raw, getCategoryCap(category, isAppointmentDriven));
+    categoryScores[category.toLowerCase()] = Math.min(
+      100,
+      Math.round((raw / maxPossible) * 100)
+    );
+    overallScore += Math.min(
+      raw,
+      getCategoryCap(category, isAppointmentDriven)
+    );
   }
   overallScore = Math.min(100, Math.round(overallScore));
 

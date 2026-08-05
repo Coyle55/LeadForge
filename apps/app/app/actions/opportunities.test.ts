@@ -148,8 +148,8 @@ describe("analyzeAuditOpportunity", () => {
     });
     analysisCreateMock.mockResolvedValue({ id: "analysis_1" });
     generateMock.mockResolvedValue(generated);
-    transactionMock.mockImplementation(
-      async (ops: Array<Promise<unknown>>) => Promise.all(ops)
+    transactionMock.mockImplementation(async (ops: Array<Promise<unknown>>) =>
+      Promise.all(ops)
     );
     const { analyzeAuditOpportunity } = await import("./opportunities");
     await analyzeAuditOpportunity("audit_1");
@@ -162,7 +162,14 @@ describe("analyzeAuditOpportunity", () => {
     expect(generateMock).toHaveBeenCalledWith(
       expect.objectContaining({
         expectedServiceCategories: ["LEAD_CAPTURE_REPAIR"],
-        allowedNumbers: expect.arrayContaining(["0", "1", "2", "100", "15", "2"]),
+        allowedNumbers: expect.arrayContaining([
+          "0",
+          "1",
+          "2",
+          "100",
+          "15",
+          "2",
+        ]),
       }),
       { model: "openai/test-model" }
     );
@@ -197,7 +204,9 @@ describe("analyzeAuditOpportunity", () => {
         warnings: interpretationOutput.warnings,
       }),
     });
-    expect(analysisUpdateMock.mock.calls[0]?.[0].data.overallScore).toBeGreaterThan(0);
+    expect(
+      analysisUpdateMock.mock.calls[0]?.[0].data.overallScore
+    ).toBeGreaterThan(0);
     expect(transactionMock).toHaveBeenCalled();
     expect(redirectMock).toHaveBeenCalledWith("/opportunities/analysis_1");
   });
@@ -239,7 +248,9 @@ describe("analyzeAuditOpportunity", () => {
     const { InterpretationGenerationError } = await import(
       "../lib/opportunity/generate"
     );
-    generateMock.mockRejectedValue(new InterpretationGenerationError("INVALID_OUTPUT"));
+    generateMock.mockRejectedValue(
+      new InterpretationGenerationError("INVALID_OUTPUT")
+    );
     analysisUpdateMock.mockResolvedValue({});
     const { analyzeAuditOpportunity } = await import("./opportunities");
     await analyzeAuditOpportunity("audit_1");
