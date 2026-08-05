@@ -19,6 +19,11 @@ export interface TaskActionResult {
 }
 
 type TaskMutationAction = "complete" | "create" | "reopen" | "update";
+interface TaskMutationIds {
+  prospectId?: string;
+  taskId?: string;
+  userId: string;
+}
 
 const authorize = async () => {
   const { userId } = await auth();
@@ -32,10 +37,56 @@ const parseTaskForm = (formData: FormData) =>
     priority: formData.get("priority"),
   });
 
-const revalidateTaskPaths = (prospectId: string) => {
-  revalidatePath("/tasks");
-  revalidatePath(`/prospects/${prospectId}`);
-  revalidatePath("/");
+const safeErrorLog = (
+  event: string,
+  metadata: TaskMutationIds & {
+    action: TaskMutationAction;
+    code: "CACHE_REVALIDATION_ERROR" | "DATABASE_ERROR" | "LOGGING_ERROR";
+  }
+) => {
+  try {
+    logger.error(event, { ...metadata });
+  } catch {
+    // Observability must never change an action result.
+  }
+};
+
+const logMutationSuccess = (
+  action: TaskMutationAction,
+  ids: TaskMutationIds
+) => {
+  try {
+    logger.info("task.mutation.succeeded", { action, ...ids });
+  } catch {
+    safeErrorLog("task.observability.failed", {
+      action,
+      code: "LOGGING_ERROR",
+      ...ids,
+    });
+  }
+};
+
+const revalidateTaskPaths = (
+  prospectId: string,
+  action: TaskMutationAction,
+  ids: TaskMutationIds
+) => {
+  let failed = false;
+  for (const path of ["/tasks", `/prospects/${prospectId}`, "/"]) {
+    try {
+      revalidatePath(path);
+    } catch {
+      failed = true;
+    }
+  }
+
+  if (failed) {
+    safeErrorLog("task.revalidation.failed", {
+      action,
+      code: "CACHE_REVALIDATION_ERROR",
+      ...ids,
+    });
+  }
 };
 
 const logPersistenceFailure = (
@@ -43,7 +94,7 @@ const logPersistenceFailure = (
   action: TaskMutationAction,
   record: { prospectId: string } | { taskId: string }
 ) => {
-  logger.error("task.mutation.failed", {
+  safeErrorLog("task.mutation.failed", {
     action,
     code: "DATABASE_ERROR",
     ...record,
@@ -76,6 +127,8 @@ export const createTask = async (
     };
   }
 
+  let createdTaskId: string;
+  let ownedProspectId: string;
   try {
     const prospect = await database.prospect.findFirst({
       where: { id: prospectId, userId, archivedAt: null },
@@ -92,18 +145,21 @@ export const createTask = async (
         ...parsed.data,
       },
     });
-    logger.info("task.mutation.succeeded", {
-      action: "create",
-      prospectId: prospect.id,
-      taskId: task.id,
-      userId,
-    });
-    revalidateTaskPaths(prospect.id);
-    return { status: "success", message: "Task created." };
+    createdTaskId = task.id;
+    ownedProspectId = prospect.id;
   } catch {
     logPersistenceFailure(userId, "create", { prospectId });
     return { status: "error", message: "Unable to save task." };
   }
+
+  const ids = {
+    prospectId: ownedProspectId,
+    taskId: createdTaskId,
+    userId,
+  };
+  logMutationSuccess("create", ids);
+  revalidateTaskPaths(ownedProspectId, "create", ids);
+  return { status: "success", message: "Task created." };
 };
 
 export const updateTask = async (
@@ -125,6 +181,7 @@ export const updateTask = async (
     };
   }
 
+  let ownedProspectId: string;
   try {
     const task = await getOwnedTask(taskId, userId);
     if (!task) {
@@ -138,18 +195,16 @@ export const updateTask = async (
     if (result.count === 0) {
       return { status: "error", message: "Task not found." };
     }
-
-    logger.info("task.mutation.succeeded", {
-      action: "update",
-      taskId,
-      userId,
-    });
-    revalidateTaskPaths(task.prospectId);
-    return { status: "success", message: "Task saved." };
+    ownedProspectId = task.prospectId;
   } catch {
     logPersistenceFailure(userId, "update", { taskId });
     return { status: "error", message: "Unable to save task." };
   }
+
+  const ids = { taskId, userId };
+  logMutationSuccess("update", ids);
+  revalidateTaskPaths(ownedProspectId, "update", ids);
+  return { status: "success", message: "Task saved." };
 };
 
 const setTaskStatus = async (
@@ -161,6 +216,7 @@ const setTaskStatus = async (
     return { status: "error", message: "Not authorized." };
   }
 
+  let ownedProspectId: string;
   try {
     const task = await getOwnedTask(taskId, userId);
     if (!task) {
@@ -181,17 +237,19 @@ const setTaskStatus = async (
     if (result.count === 0) {
       return { status: "error", message: "Task not found." };
     }
-
-    logger.info("task.mutation.succeeded", { action, taskId, userId });
-    revalidateTaskPaths(task.prospectId);
-    return {
-      status: "success",
-      message: completing ? "Task completed." : "Task reopened.",
-    };
+    ownedProspectId = task.prospectId;
   } catch {
     logPersistenceFailure(userId, action, { taskId });
     return { status: "error", message: "Unable to update task." };
   }
+
+  const ids = { taskId, userId };
+  logMutationSuccess(action, ids);
+  revalidateTaskPaths(ownedProspectId, action, ids);
+  return {
+    status: "success",
+    message: action === "complete" ? "Task completed." : "Task reopened.",
+  };
 };
 
 export const completeTask = async (taskId: string) =>

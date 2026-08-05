@@ -5,6 +5,7 @@ const prospectFindFirstMock = vi.fn();
 const taskCreateMock = vi.fn();
 const taskFindFirstMock = vi.fn();
 const taskUpdateManyMock = vi.fn();
+const logInfoMock = vi.fn();
 const logErrorMock = vi.fn();
 const revalidatePathMock = vi.fn();
 
@@ -23,7 +24,7 @@ vi.mock("@repo/database", () => ({
   },
 }));
 vi.mock("@repo/observability", () => ({
-  logger: { info: vi.fn(), error: logErrorMock },
+  logger: { info: logInfoMock, error: logErrorMock },
 }));
 vi.mock("next/cache", () => ({ revalidatePath: revalidatePathMock }));
 
@@ -297,6 +298,58 @@ describe("task actions", () => {
     });
     expect(JSON.stringify(logErrorMock.mock.calls)).not.toContain("Sensitive");
     expect(JSON.stringify(logErrorMock.mock.calls)).not.toContain("password");
+  });
+
+  it("keeps a committed create successful when cache revalidation fails", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    prospectFindFirstMock.mockResolvedValue({ id: "prospect_1" });
+    taskCreateMock.mockResolvedValue({ id: "task_1" });
+    revalidatePathMock.mockImplementationOnce(() => {
+      throw new Error("cache internals leaked");
+    });
+    const { createTask } = await import("./tasks");
+
+    await expect(createTask("prospect_1", {}, form(valid))).resolves.toEqual({
+      status: "success",
+      message: "Task created.",
+    });
+    expect(taskCreateMock).toHaveBeenCalledTimes(1);
+    expect(revalidatedPaths()).toEqual([
+      "/tasks",
+      "/prospects/prospect_1",
+      "/",
+    ]);
+    expect(logErrorMock).toHaveBeenCalledWith("task.revalidation.failed", {
+      action: "create",
+      code: "CACHE_REVALIDATION_ERROR",
+      prospectId: "prospect_1",
+      taskId: "task_1",
+      userId: "user_owner",
+    });
+    expect(JSON.stringify(logErrorMock.mock.calls)).not.toContain("internals");
+  });
+
+  it("keeps a committed update successful when success logging fails", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    taskFindFirstMock.mockResolvedValue({ prospectId: "prospect_1" });
+    taskUpdateManyMock.mockResolvedValue({ count: 1 });
+    logInfoMock.mockImplementationOnce(() => {
+      throw new Error("logger internals leaked");
+    });
+    const { updateTask } = await import("./tasks");
+
+    await expect(updateTask("task_1", {}, form(valid))).resolves.toEqual({
+      status: "success",
+      message: "Task saved.",
+    });
+    expect(taskUpdateManyMock).toHaveBeenCalledTimes(1);
+    expect(logErrorMock).toHaveBeenCalledWith("task.observability.failed", {
+      action: "update",
+      code: "LOGGING_ERROR",
+      taskId: "task_1",
+      userId: "user_owner",
+    });
+    expect(JSON.stringify(logErrorMock.mock.calls)).not.toContain("internals");
   });
 
   it.each([
