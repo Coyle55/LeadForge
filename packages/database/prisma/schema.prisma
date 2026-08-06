@@ -58,6 +58,9 @@ model Prospect {
   businessCategory BusinessCategory?
   lastContactedAt  DateTime?
   archivedAt       DateTime?
+  sourceProvider   String?
+  sourceExternalId String?
+  sourceUrls       Json?
   createdAt        DateTime           @default(now())
   updatedAt        DateTime           @updatedAt
   deal             Deal?
@@ -330,4 +333,33 @@ model OutreachDraft {
   @@index([userId, prospectId, createdAt])
   @@index([userId, analysisId, createdAt])
   @@index([userId, recommendationId, createdAt])
+}
+
+model ProspectImportBatch {
+  id             String   @id @default(cuid())
+  userId         String
+  provider       String
+  reasoningModel String
+  query          String
+  location       String
+  requestedCount Int
+  returnedCount  Int
+  importedCount  Int
+  skippedCount   Int
+  failedCount    Int
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model ProspectDiscoveryCache {
+  id           String   @id @default(cuid())
+  userId       String
+  cacheKey     String
+  result       Json
+  inputTokens  Int?
+  outputTokens Int?
+  createdAt    DateTime @default(now())
+
+  @@unique([userId, cacheKey])
 }
