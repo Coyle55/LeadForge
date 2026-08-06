@@ -22,6 +22,18 @@ describe("validateCandidate", () => {
     });
   });
 
+  it("coerces a bare-string sourceUrls into a one-element array", () => {
+    const result = validateCandidate({
+      businessName: "Ace Plumbing",
+      sourceUrls: "https://example.com/listing",
+      confidence: "MEDIUM",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.sourceUrls).toEqual(["https://example.com/listing"]);
+    }
+  });
+
   it("rejects a candidate with empty sourceUrls", () => {
     const result = validateCandidate({
       businessName: "Ace Plumbing",

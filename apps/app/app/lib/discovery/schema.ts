@@ -18,7 +18,15 @@ export const rawCandidateSchema = z.object({
   formattedAddress: optionalNonEmptyString(),
   city: optionalNonEmptyString(),
   state: optionalNonEmptyString(),
-  sourceUrls: z.array(z.string().trim().min(1)).min(1),
+  // The model sometimes emits a single source URL as a bare string instead
+  // of a one-element array (observed on a real Gateway/Perplexity call,
+  // not a hypothetical) -- coerce a lone string into a one-element array
+  // rather than rejecting an otherwise-valid candidate over this shape
+  // mismatch.
+  sourceUrls: z.preprocess(
+    (val) => (typeof val === "string" ? [val] : val),
+    z.array(z.string().trim().min(1)).min(1)
+  ),
   // Nothing constrains the model to always emit a valid confidence value.
   // Rather than rejecting an otherwise-valid candidate over this field,
   // fall back to "LOW" for a missing or invalid value.
