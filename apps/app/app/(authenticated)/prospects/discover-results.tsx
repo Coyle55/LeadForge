@@ -67,10 +67,15 @@ const confidenceVariant: Record<
   LOW: "outline",
 };
 
-const formatAddress = (candidate: DiscoveredProspect) =>
-  candidate.formattedAddress ??
-  [candidate.city, candidate.state].filter(Boolean).join(", ") ??
-  null;
+const formatAddress = (candidate: DiscoveredProspect): string | null => {
+  if (candidate.formattedAddress) {
+    return candidate.formattedAddress;
+  }
+  const cityState = [candidate.city, candidate.state]
+    .filter(Boolean)
+    .join(", ");
+  return cityState.length > 0 ? cityState : null;
+};
 
 type ImportOutcome = ImportProspectsResult | ImportAndAuditProspectsResult;
 
