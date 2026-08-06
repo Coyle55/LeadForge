@@ -93,4 +93,33 @@ describe("PerplexityGatewayDiscoveryProvider", () => {
     expect(result.results).toHaveLength(1);
     expect(result.rejected).toHaveLength(1);
   });
+
+  it("rejects a non-object candidate element without throwing or failing the whole search", async () => {
+    generateMock.mockResolvedValue({
+      candidates: [
+        {
+          businessName: "Ace Plumbing",
+          sourceUrls: ["https://example.com"],
+          confidence: "HIGH",
+        },
+        null,
+      ],
+      inputTokens: 10,
+      outputTokens: 20,
+      durationMs: 5,
+    });
+    const { PerplexityGatewayDiscoveryProvider } = await import(
+      "./perplexity-provider"
+    );
+    const provider = new PerplexityGatewayDiscoveryProvider({
+      model: "anthropic/claude-haiku-4.5",
+    });
+    const result = await provider.search({
+      businessType: "plumbers",
+      location: "Cincinnati, OH",
+      resultLimit: 10,
+    });
+    expect(result.results).toHaveLength(1);
+    expect(result.rejected).toHaveLength(1);
+  });
 });

@@ -45,4 +45,28 @@ describe("validateCandidate", () => {
       expect(result.value.websiteUrl).toBeUndefined();
     }
   });
+
+  it("accepts a candidate missing confidence and defaults it to LOW", () => {
+    const result = validateCandidate({
+      businessName: "Ace Plumbing",
+      sourceUrls: ["https://example.com"],
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.confidence).toBe("LOW");
+    }
+  });
+
+  it("treats an empty-string websiteUrl as absent rather than rejecting", () => {
+    const result = validateCandidate({
+      businessName: "Ace Plumbing",
+      websiteUrl: "",
+      sourceUrls: ["https://example.com"],
+      confidence: "MEDIUM",
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.websiteUrl).toBeUndefined();
+    }
+  });
 });

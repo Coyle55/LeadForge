@@ -79,6 +79,17 @@ describe("generateDiscovery", () => {
     ).rejects.toMatchObject({ code: "TIMEOUT" });
   });
 
+  it("tolerates a non-object element in candidates without throwing", async () => {
+    const result = await generateDiscovery(input, {
+      model: "test",
+      generate: vi.fn().mockResolvedValue({
+        output: { candidates: [...validOutput.candidates, null] },
+        usage: { inputTokens: 5, outputTokens: 5 },
+      }),
+    });
+    expect(result.candidates).toHaveLength(2);
+  });
+
   it("maps a malformed model output to INVALID_OUTPUT", async () => {
     await expect(
       generateDiscovery(input, {
