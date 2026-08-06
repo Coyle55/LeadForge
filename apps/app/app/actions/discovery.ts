@@ -18,6 +18,7 @@ import type {
   DiscoveredProspect,
   ProspectDiscoveryResult,
 } from "../lib/discovery/types";
+import { runAuditForProspect } from "./audits";
 
 // Search results are never model-generated business data by the time they
 // reach this cast -- they were already validated candidate-by-candidate in
@@ -364,4 +365,49 @@ export const importProspects = async (
   });
 
   return { status: "success", imported, skipped, failed };
+};
+
+// Only ever audits the first MAX_AUDITS_PER_BATCH imported prospects. There
+// is no background-job infrastructure in this codebase -- audits beyond the
+// cap are never attempted at all (not "queued" for later), so a prospect
+// that falls past the cap simply has no entry in the returned `audits`
+// array, distinct from an attempted-and-failed audit.
+const MAX_AUDITS_PER_BATCH = 10;
+
+export type ImportAndAuditProspectsResult =
+  | (Extract<ImportProspectsResult, { status: "success" }> & {
+      audits: Array<{ prospectId: string; status: "succeeded" | "failed" }>;
+    })
+  | { status: "error"; message: string };
+
+// Imports the curated candidates first, then runs the existing
+// website-audit engine sequentially (never in parallel) over the first
+// MAX_AUDITS_PER_BATCH imported prospect ids. Each audit is isolated: one
+// throwing or failing audit never stops the remaining audits in the batch,
+// and a failed audit never un-imports (rolls back) the prospect it ran
+// against -- the import already fully committed before any audit runs.
+export const importAndAuditProspects = async (
+  candidates: DiscoveredProspect[],
+  batchContext: ProspectImportBatchContext
+): Promise<ImportAndAuditProspectsResult> => {
+  const imported = await importProspects(candidates, batchContext);
+  if (imported.status === "error") {
+    return imported;
+  }
+
+  const audits: Array<{ prospectId: string; status: "succeeded" | "failed" }> =
+    [];
+  for (const prospectId of imported.imported.slice(0, MAX_AUDITS_PER_BATCH)) {
+    try {
+      const outcome = await runAuditForProspect(prospectId);
+      audits.push({
+        prospectId,
+        status: outcome.status === "error" ? "failed" : outcome.status,
+      });
+    } catch {
+      audits.push({ prospectId, status: "failed" });
+    }
+  }
+
+  return { ...imported, audits };
 };

@@ -8,8 +8,10 @@ const prospectFindManyMock = vi.fn();
 const prospectCreateMock = vi.fn();
 const prospectImportBatchCreateMock = vi.fn();
 const searchMock = vi.fn();
+const runAuditForProspectMock = vi.fn();
 
 vi.mock("@repo/auth/server", () => ({ auth: authMock }));
+vi.mock("./audits", () => ({ runAuditForProspect: runAuditForProspectMock }));
 vi.mock("@repo/auth", () => ({
   isAllowedUserId: (id: string) => id === "user_owner",
 }));
@@ -522,5 +524,155 @@ describe("importProspects", () => {
         pipelineStage: "NEW",
       }),
     });
+  });
+});
+
+describe("importAndAuditProspects", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    prospectFindManyMock.mockResolvedValue([]);
+    prospectCreateMock.mockImplementation(
+      ({ data }: { data: { businessName: string } }) =>
+        Promise.resolve({ id: `new_${data.businessName}` })
+    );
+    prospectImportBatchCreateMock.mockResolvedValue({ id: "batch_1" });
+  });
+
+  it("attempts no audits at all when importProspects itself returns an error", async () => {
+    authMock.mockResolvedValueOnce({ userId: null });
+    const { importAndAuditProspects } = await import("./discovery");
+    const result = await importAndAuditProspects(
+      [buildCandidate()],
+      batchContext
+    );
+    expect(result.status).toBe("error");
+    expect(runAuditForProspectMock).not.toHaveBeenCalled();
+  });
+
+  it("only runs audits for prospects that were actually imported, never for skipped or failed candidates", async () => {
+    const duplicateCandidate = buildCandidate({
+      discoveryId: "dupe.com",
+      websiteUrl: "https://dupe.com",
+    });
+    const failingCandidate = buildCandidate({
+      discoveryId: "bad.com",
+      businessName: "",
+      websiteUrl: "https://bad.com",
+    });
+    const goodCandidate = buildCandidate({
+      discoveryId: "good.com",
+      businessName: "Good Plumbing",
+      websiteUrl: "https://good.com",
+    });
+    prospectFindManyMock.mockResolvedValue([
+      {
+        id: "existing_dupe",
+        businessName: "Ace Plumbing",
+        websiteUrl: "https://dupe.com",
+        phone: null,
+        location: null,
+        sourceExternalId: null,
+      },
+    ]);
+    runAuditForProspectMock.mockResolvedValue({
+      status: "succeeded",
+      auditId: "audit_1",
+    });
+    const { importAndAuditProspects } = await import("./discovery");
+    const result = await importAndAuditProspects(
+      [duplicateCandidate, failingCandidate, goodCandidate],
+      batchContext
+    );
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.imported).toEqual(["new_Good Plumbing"]);
+      expect(result.audits).toEqual([
+        { prospectId: "new_Good Plumbing", status: "succeeded" },
+      ]);
+    }
+    expect(runAuditForProspectMock).toHaveBeenCalledTimes(1);
+    expect(runAuditForProspectMock).toHaveBeenCalledWith("new_Good Plumbing");
+  });
+
+  it("caps audits at the first 10 imported prospects, leaving the rest absent from the audits array rather than marked failed", async () => {
+    const candidates = Array.from({ length: 12 }, (_, i) =>
+      buildCandidate({
+        discoveryId: `biz${i}.com`,
+        businessName: `Biz ${i}`,
+        websiteUrl: `https://biz${i}.com`,
+      })
+    );
+    runAuditForProspectMock.mockResolvedValue({
+      status: "succeeded",
+      auditId: "audit_x",
+    });
+    const { importAndAuditProspects } = await import("./discovery");
+    const result = await importAndAuditProspects(candidates, batchContext);
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.imported).toHaveLength(12);
+      expect(result.audits).toHaveLength(10);
+    }
+    expect(runAuditForProspectMock).toHaveBeenCalledTimes(10);
+  });
+
+  it("isolates one throwing audit to its own prospect without stopping the remaining audits in the batch", async () => {
+    const candidateA = buildCandidate({
+      discoveryId: "a.com",
+      businessName: "A Biz",
+      websiteUrl: "https://a.com",
+    });
+    const candidateB = buildCandidate({
+      discoveryId: "b.com",
+      businessName: "B Biz",
+      websiteUrl: "https://b.com",
+    });
+    runAuditForProspectMock
+      .mockRejectedValueOnce(new Error("boom"))
+      .mockResolvedValueOnce({ status: "succeeded", auditId: "audit_b" });
+    const { importAndAuditProspects } = await import("./discovery");
+    const result = await importAndAuditProspects(
+      [candidateA, candidateB],
+      batchContext
+    );
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.audits).toEqual([
+        { prospectId: "new_A Biz", status: "failed" },
+        { prospectId: "new_B Biz", status: "succeeded" },
+      ]);
+    }
+    expect(runAuditForProspectMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("never un-imports a prospect when its audit fails", async () => {
+    const candidate = buildCandidate();
+    runAuditForProspectMock.mockRejectedValue(new Error("boom"));
+    const { importAndAuditProspects } = await import("./discovery");
+    const result = await importAndAuditProspects([candidate], batchContext);
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.imported).toEqual(["new_Ace Plumbing"]);
+      expect(result.audits).toEqual([
+        { prospectId: "new_Ace Plumbing", status: "failed" },
+      ]);
+    }
+  });
+
+  it("maps an error outcome from runAuditForProspect to a failed audit status", async () => {
+    const candidate = buildCandidate();
+    runAuditForProspectMock.mockResolvedValue({
+      status: "error",
+      message: "nope",
+    });
+    const { importAndAuditProspects } = await import("./discovery");
+    const result = await importAndAuditProspects([candidate], batchContext);
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.audits).toEqual([
+        { prospectId: "new_Ace Plumbing", status: "failed" },
+      ]);
+    }
   });
 });
