@@ -7,6 +7,16 @@ export const buildAllowedNumbers = (
 ): string[] => {
   const numbers = new Set<string>();
   const add = (value: number) => numbers.add(String(value));
+  const addFromEvidence = (evidence: unknown) => {
+    if (evidence === null || typeof evidence !== "object") {
+      return;
+    }
+    for (const value of Object.values(evidence as Record<string, unknown>)) {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        add(value);
+      }
+    }
+  };
 
   // Universal bounds and small structural counts (recommendations.length
   // is always 0-2) that are safe to reference even though they aren't
@@ -25,6 +35,7 @@ export const buildAllowedNumbers = (
   }
   for (const reason of scoring.topReasons) {
     add(reason.points);
+    addFromEvidence(reason.evidence);
   }
   for (const candidate of recommendations) {
     add(candidate.weight);

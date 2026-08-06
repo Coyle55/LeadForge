@@ -87,6 +87,33 @@ describe("buildAllowedNumbers", () => {
     expect(result.filter((value) => value === "1")).toHaveLength(1);
   });
 
+  it("includes numeric values nested in topReasons evidence, ignoring non-numeric evidence values", () => {
+    const scoringWithEvidence: ScoringResult = {
+      tier: "HIGH",
+      overallScore: 72,
+      categoryScores: {
+        trust: 80,
+      },
+      scoringBreakdown: [
+        { category: "TRUST", checkKey: "contact_path", points: 15 },
+      ],
+      topReasons: [
+        {
+          category: "TECHNICAL",
+          checkKey: "render_blocking_resources",
+          points: 15,
+          evidence: { resources: 23, found: false },
+        },
+      ],
+      disqualifiers: [],
+    };
+    const result = buildAllowedNumbers(scoringWithEvidence, []);
+    expect(result).toContain("23");
+    // "found: false" must not be coerced into a numeric entry like "0" or "1"
+    // beyond what the universal bounds already provide.
+    expect(result.filter((value) => value === "false")).toHaveLength(0);
+  });
+
   it("returns only the universal bounds for an empty scoring/recommendation pair", () => {
     const empty: ScoringResult = {
       tier: "LOW",
