@@ -284,10 +284,14 @@ export const importProspects = async (
     }
 
     // Re-enforce website-verification eligibility server-side. A
-    // candidate can never be legitimately verified without a websiteUrl,
-    // so this checks both -- never trust a client-submitted
-    // `websiteVerified: true` flag alone.
-    if (!(candidate.websiteUrl && candidate.websiteVerified)) {
+    // candidate can never be legitimately verified without a non-blank
+    // websiteUrl, so this checks both -- never trust a client-submitted
+    // `websiteVerified: true` flag alone. `.trim()` matters: a
+    // whitespace-only websiteUrl is truthy in JS but prospectSchema's
+    // preprocess step normalizes it to null, so checking the raw string
+    // would let a forged `{ websiteUrl: "   ", websiteVerified: true }`
+    // candidate through with a null website.
+    if (!(candidate.websiteUrl?.trim() && candidate.websiteVerified)) {
       failed.push({
         discoveryId: candidate.discoveryId,
         reason: "Website not verified",

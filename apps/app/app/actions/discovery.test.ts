@@ -356,6 +356,24 @@ describe("importProspects", () => {
     expect(prospectCreateMock).not.toHaveBeenCalled();
   });
 
+  it("rejects a candidate with a whitespace-only websiteUrl even if the client marked it as verified", async () => {
+    const candidate = buildCandidate({
+      websiteUrl: "   ",
+      websiteVerified: true,
+    });
+    const { importProspects } = await import("./discovery");
+    const result = await importProspects([candidate], batchContext);
+
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.failed).toEqual([
+        { discoveryId: "aceplumbing.com", reason: "Website not verified" },
+      ]);
+      expect(result.imported).toEqual([]);
+    }
+    expect(prospectCreateMock).not.toHaveBeenCalled();
+  });
+
   it("rejects a candidate whose websiteVerified flag is false", async () => {
     const candidate = buildCandidate({ websiteVerified: false });
     const { importProspects } = await import("./discovery");
@@ -393,6 +411,46 @@ describe("importProspects", () => {
       expect(result.imported).toEqual(["new_Good Plumbing"]);
     }
     expect(prospectCreateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("isolates a thrown database error to one candidate without stopping the rest of the batch", async () => {
+    const throwingCandidate = buildCandidate({
+      discoveryId: "throws.com",
+      businessName: "Throws Plumbing",
+      websiteUrl: "https://throws.com",
+    });
+    const goodCandidate = buildCandidate({
+      discoveryId: "goodplumbing.com",
+      businessName: "Good Plumbing",
+      websiteUrl: "https://goodplumbing.com",
+    });
+    prospectCreateMock.mockImplementationOnce(() => {
+      throw new Error("database unavailable");
+    });
+    const { importProspects } = await import("./discovery");
+    const result = await importProspects(
+      [throwingCandidate, goodCandidate],
+      batchContext
+    );
+
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.failed).toEqual([
+        { discoveryId: "throws.com", reason: "Unable to save prospect." },
+      ]);
+      expect(result.imported).toEqual(["new_Good Plumbing"]);
+    }
+    expect(prospectCreateMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("never maps candidate.category onto the fixed-enum businessCategory field", async () => {
+    const candidate = buildCandidate({ category: "Plumbing" });
+    const { importProspects } = await import("./discovery");
+    await importProspects([candidate], batchContext);
+
+    expect(prospectCreateMock).toHaveBeenCalledWith({
+      data: expect.objectContaining({ businessCategory: null }),
+    });
   });
 
   it("persists a ProspectImportBatch row with accurate counts", async () => {
