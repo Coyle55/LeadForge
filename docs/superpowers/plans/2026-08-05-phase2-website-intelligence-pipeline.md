@@ -931,6 +931,25 @@ export const buildAllowedNumbers = (
 ): string[] => {
   const numbers = new Set<string>();
   const add = (value: number) => numbers.add(String(value));
+  // topReasons carry the evidence AuditCheck rows already surfaced --
+  // e.g. { resources: 23 } or { brokenImages: 6 } -- and that evidence is
+  // literally part of the input handed to the AI, which the system prompt
+  // explicitly tells it to ground its prose in. Any numeric value nested
+  // in that evidence is therefore already "present in its input" and must
+  // be allowed, or the model gets rejected for faithfully citing exactly
+  // the evidence it was given (confirmed against a real interpretation
+  // call during acceptance testing: rejected for citing "23" from
+  // { resources: 23 } before this was added).
+  const addFromEvidence = (evidence: unknown) => {
+    if (evidence === null || typeof evidence !== "object") {
+      return;
+    }
+    for (const value of Object.values(evidence as Record<string, unknown>)) {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        add(value);
+      }
+    }
+  };
 
   // Universal bounds and small structural counts (recommendations.length
   // is always 0-2) that are safe to reference even though they aren't
@@ -949,6 +968,7 @@ export const buildAllowedNumbers = (
   }
   for (const reason of scoring.topReasons) {
     add(reason.points);
+    addFromEvidence(reason.evidence);
   }
   for (const candidate of recommendations) {
     add(candidate.weight);
@@ -956,6 +976,8 @@ export const buildAllowedNumbers = (
   return [...numbers];
 };
 ```
+
+Write an additional test proving a numeric value nested in a `topReasons[].evidence` object (e.g. `{ resources: 23 }`) appears in the output, and that a non-numeric evidence value (e.g. `{ found: false }`) does not produce a spurious entry.
 
 Write `allowed-numbers.test.ts` proving: the universal bounds (`"0"`, `"1"`, `"2"`, `"100"`) are always present; every category score, breakdown point value, top-reason point value, and recommendation weight from a representative `ScoringResult`/`RecommendationCandidate[]` pair appears in the output; no duplicates (it's built from a `Set`).
 
