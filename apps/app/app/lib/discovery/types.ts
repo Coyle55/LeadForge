@@ -7,12 +7,12 @@ export interface ProspectDiscoveryInput {
 export type DiscoveryConfidence = "HIGH" | "MEDIUM" | "LOW";
 
 export interface DiscoveredProspect {
+  businessName: string;
   category?: string;
   city?: string;
   confidence: DiscoveryConfidence;
   discoveryId: string;
   formattedAddress?: string;
-  businessName: string;
   phone?: string;
   providerCandidateId?: string;
   sourceUrls: string[];
