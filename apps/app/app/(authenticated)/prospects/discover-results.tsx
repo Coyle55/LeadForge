@@ -162,41 +162,48 @@ export const DiscoverResults = ({
   candidates: DiscoveredProspect[];
   duplicateProspectIds: DuplicateProspectIds;
 }) => {
-  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
+  // Selection is tracked by array index, not discoveryId: two distinct
+  // physical locations can legitimately share one discoveryId when they
+  // share a domain (e.g. a multi-location business with one shared
+  // website), and a discoveryId-keyed Set would silently select/import
+  // both rows when the user only checked one.
+  const [selectedIndices, setSelectedIndices] = useState<ReadonlySet<number>>(
     new Set()
   );
   const [outcome, setOutcome] = useState<ImportOutcome | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const eligibleIds = useMemo(
+  const eligibleIndices = useMemo(
     () =>
       new Set(
         candidates
-          .filter((candidate) =>
+          .map((candidate, index) => ({ candidate, index }))
+          .filter(({ candidate }) =>
             isImportEligible(candidate, duplicateProspectIds)
           )
-          .map((candidate) => candidate.discoveryId)
+          .map(({ index }) => index)
       ),
     [candidates, duplicateProspectIds]
   );
 
   const allEligibleSelected =
-    eligibleIds.size > 0 && [...eligibleIds].every((id) => selectedIds.has(id));
+    eligibleIndices.size > 0 &&
+    [...eligibleIndices].every((index) => selectedIndices.has(index));
 
-  const toggleCandidate = (discoveryId: string, checked: boolean) => {
-    setSelectedIds((previous) => {
+  const toggleCandidate = (index: number, checked: boolean) => {
+    setSelectedIndices((previous) => {
       const next = new Set(previous);
       if (checked) {
-        next.add(discoveryId);
+        next.add(index);
       } else {
-        next.delete(discoveryId);
+        next.delete(index);
       }
       return next;
     });
   };
 
   const toggleSelectAll = (checked: boolean) => {
-    setSelectedIds(checked ? new Set(eligibleIds) : new Set());
+    setSelectedIndices(checked ? new Set(eligibleIndices) : new Set());
   };
 
   const runImport = (
@@ -205,8 +212,8 @@ export const DiscoverResults = ({
       batchContext: ProspectImportBatchContext
     ) => Promise<ImportOutcome>
   ) => {
-    const selected = candidates.filter((candidate) =>
-      selectedIds.has(candidate.discoveryId)
+    const selected = candidates.filter((_, index) =>
+      selectedIndices.has(index)
     );
     startTransition(async () => {
       const result = await action(selected, batchContext);
@@ -232,7 +239,7 @@ export const DiscoverResults = ({
                 <Checkbox
                   aria-label="Select all eligible candidates"
                   checked={allEligibleSelected}
-                  disabled={pending || eligibleIds.size === 0}
+                  disabled={pending || eligibleIndices.size === 0}
                   onCheckedChange={(checked) =>
                     toggleSelectAll(checked === true)
                   }
@@ -248,8 +255,8 @@ export const DiscoverResults = ({
             </TableRow>
           </TableHeader>
           <TableBody>
-            {candidates.map((candidate) => {
-              const eligible = eligibleIds.has(candidate.discoveryId);
+            {candidates.map((candidate, index) => {
+              const eligible = eligibleIndices.has(index);
               const reason = getIneligibilityReason(
                 candidate,
                 duplicateProspectIds
@@ -257,8 +264,14 @@ export const DiscoverResults = ({
               const duplicateId = duplicateProspectIds[candidate.discoveryId];
               const address = formatAddress(candidate);
 
+              // discoveryId alone isn't guaranteed unique within one result
+              // set (two physical locations can share a domain/website),
+              // and this list is a fixed, non-reordered snapshot for the
+              // lifetime of one search -- the index safely disambiguates
+              // the key.
               return (
-                <TableRow key={candidate.discoveryId}>
+                // biome-ignore lint/suspicious/noArrayIndexKey: see comment above
+                <TableRow key={`${candidate.discoveryId}-${index}`}>
                   <TableCell>
                     <Checkbox
                       aria-label={
@@ -266,10 +279,10 @@ export const DiscoverResults = ({
                           ? `Select ${candidate.businessName}`
                           : (reason ?? "Not eligible for import")
                       }
-                      checked={selectedIds.has(candidate.discoveryId)}
+                      checked={selectedIndices.has(index)}
                       disabled={pending || !eligible}
                       onCheckedChange={(checked) =>
-                        toggleCandidate(candidate.discoveryId, checked === true)
+                        toggleCandidate(index, checked === true)
                       }
                       title={eligible ? undefined : (reason ?? undefined)}
                     />
@@ -357,7 +370,7 @@ export const DiscoverResults = ({
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <Button
-          disabled={pending || selectedIds.size === 0}
+          disabled={pending || selectedIndices.size === 0}
           onClick={() => runImport(importProspects)}
           type="button"
           variant="outline"
@@ -365,7 +378,7 @@ export const DiscoverResults = ({
           {pending ? "Importing…" : "Import Selected"}
         </Button>
         <Button
-          disabled={pending || selectedIds.size === 0}
+          disabled={pending || selectedIndices.size === 0}
           onClick={() => runImport(importAndAuditProspects)}
           type="button"
         >

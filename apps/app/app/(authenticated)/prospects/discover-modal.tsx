@@ -101,7 +101,7 @@ export const DiscoverModal = () => {
     : null;
 
   return (
-    <DialogContent className="max-h-[85vh] w-[95vw] max-w-6xl overflow-y-auto">
+    <DialogContent className="max-h-[85vh] w-[95vw] overflow-y-auto sm:max-w-6xl">
       <DialogHeader>
         <DialogTitle>Discover prospects</DialogTitle>
         <DialogDescription>
