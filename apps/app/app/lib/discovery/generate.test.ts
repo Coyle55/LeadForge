@@ -34,7 +34,7 @@ describe("generateDiscovery", () => {
       })(),
     });
 
-    expect(DISCOVERY_PROMPT_VERSION).toBe("discovery-v1");
+    expect(DISCOVERY_PROMPT_VERSION).toBe("discovery-v2");
     expect(generate).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "anthropic/claude-haiku-4.5",

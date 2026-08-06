@@ -3,7 +3,7 @@ import { DISCOVERY_PROMPT_VERSION, DISCOVERY_SYSTEM_PROMPT } from "./prompt";
 
 describe("DISCOVERY_SYSTEM_PROMPT", () => {
   it("has a stable prompt version", () => {
-    expect(DISCOVERY_PROMPT_VERSION).toBe("discovery-v1");
+    expect(DISCOVERY_PROMPT_VERSION).toBe("discovery-v2");
   });
 
   it("instructs the model not to fabricate fields it isn't confident about", () => {
