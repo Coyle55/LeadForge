@@ -1,0 +1,268 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const authMock = vi.fn();
+const cacheFindMock = vi.fn();
+const cacheUpsertMock = vi.fn();
+const prospectFindManyMock = vi.fn();
+const searchMock = vi.fn();
+
+vi.mock("@repo/auth/server", () => ({ auth: authMock }));
+vi.mock("@repo/auth", () => ({
+  isAllowedUserId: (id: string) => id === "user_owner",
+}));
+vi.mock("@repo/database", () => ({
+  database: {
+    prospectDiscoveryCache: {
+      findUnique: cacheFindMock,
+      upsert: cacheUpsertMock,
+    },
+    prospect: { findMany: prospectFindManyMock },
+  },
+}));
+vi.mock("@repo/observability", () => ({
+  logger: { info: vi.fn(), error: vi.fn() },
+}));
+// A mutable object so individual tests (e.g. the "model not configured"
+// case) can flip a field for just that test without vi.doMock/resetModules
+// module-cache gymnastics -- `env` is imported as a live reference to this
+// same object.
+const envMock: {
+  AI_GATEWAY_MODEL: string | undefined;
+  PROSPECT_DISCOVERY_CACHE_TTL_MINUTES: number;
+} = {
+  AI_GATEWAY_MODEL: "anthropic/claude-haiku-4.5",
+  PROSPECT_DISCOVERY_CACHE_TTL_MINUTES: 60,
+};
+vi.mock("../../env", () => ({ env: envMock }));
+// Only the provider class is mocked (it performs I/O against the AI
+// Gateway); `DiscoveryGenerationError` is imported directly from the real
+// `./generate` module in tests below so `error instanceof
+// DiscoveryGenerationError` in discovery.ts behaves exactly as it does in
+// production.
+vi.mock("../lib/discovery/perplexity-provider", () => ({
+  // A real (non-arrow) function so `new PerplexityGatewayDiscoveryProvider()`
+  // in discovery.ts can invoke it as a constructor -- an arrow function
+  // passed to mockImplementation throws "is not a constructor" under `new`.
+  PerplexityGatewayDiscoveryProvider: vi
+    .fn()
+    .mockImplementation(function MockProvider(this: {
+      search: typeof searchMock;
+    }) {
+      this.search = searchMock;
+    }),
+}));
+
+const validInput = {
+  businessType: "plumbers",
+  location: "Cincinnati, OH",
+  resultLimit: 10,
+};
+
+const buildDiscoveryResult = (overrides: Record<string, unknown> = {}) => ({
+  results: [
+    {
+      discoveryId: "aceplumbing.com",
+      businessName: "Ace Plumbing",
+      websiteUrl: "https://aceplumbing.com",
+      websiteVerified: true,
+      sourceUrls: ["https://example.com/listing"],
+      confidence: "HIGH",
+    },
+  ],
+  rejected: [],
+  query: "plumbers",
+  location: "Cincinnati, OH",
+  provider: "PERPLEXITY_GATEWAY_SEARCH",
+  reasoningModel: "anthropic/claude-haiku-4.5",
+  durationMs: 500,
+  inputTokens: 100,
+  outputTokens: 50,
+  ...overrides,
+});
+
+describe("searchProspects", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    cacheFindMock.mockResolvedValue(null);
+    prospectFindManyMock.mockResolvedValue([]);
+    envMock.AI_GATEWAY_MODEL = "anthropic/claude-haiku-4.5";
+    envMock.PROSPECT_DISCOVERY_CACHE_TTL_MINUTES = 60;
+  });
+
+  it("rejects an unauthenticated caller before touching the cache or provider", async () => {
+    authMock.mockResolvedValueOnce({ userId: null });
+    const { searchProspects } = await import("./discovery");
+    await expect(searchProspects(validInput)).resolves.toMatchObject({
+      status: "error",
+    });
+    expect(cacheFindMock).not.toHaveBeenCalled();
+    expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a caller who is not an allowed owner", async () => {
+    authMock.mockResolvedValueOnce({ userId: "user_other" });
+    const { searchProspects } = await import("./discovery");
+    await expect(searchProspects(validInput)).resolves.toMatchObject({
+      status: "error",
+    });
+    expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects empty businessType/location and out-of-range resultLimit with field errors before calling the provider", async () => {
+    const { searchProspects } = await import("./discovery");
+    const result = await searchProspects({
+      businessType: "",
+      location: "",
+      resultLimit: 0,
+    });
+    expect(result.status).toBe("error");
+    if (result.status === "error") {
+      expect(result.fieldErrors).toHaveProperty("businessType");
+      expect(result.fieldErrors).toHaveProperty("location");
+      expect(result.fieldErrors).toHaveProperty("resultLimit");
+    }
+    expect(cacheFindMock).not.toHaveBeenCalled();
+    expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a resultLimit above 25 with a field error", async () => {
+    const { searchProspects } = await import("./discovery");
+    const result = await searchProspects({ ...validInput, resultLimit: 26 });
+    expect(result.status).toBe("error");
+    if (result.status === "error") {
+      expect(result.fieldErrors).toHaveProperty("resultLimit");
+    }
+    expect(searchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns the cached result without calling the provider on a fresh cache hit", async () => {
+    const cached = buildDiscoveryResult();
+    cacheFindMock.mockResolvedValue({
+      result: cached,
+      createdAt: new Date(),
+      inputTokens: cached.inputTokens,
+      outputTokens: cached.outputTokens,
+    });
+    const { searchProspects } = await import("./discovery");
+    const result = await searchProspects(validInput);
+    expect(searchMock).not.toHaveBeenCalled();
+    expect(cacheUpsertMock).not.toHaveBeenCalled();
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.result.results).toHaveLength(1);
+    }
+  });
+
+  it("calls the provider when the cached row is older than the configured TTL", async () => {
+    cacheFindMock.mockResolvedValue({
+      result: buildDiscoveryResult(),
+      createdAt: new Date(Date.now() - 61 * 60 * 1000),
+      inputTokens: 100,
+      outputTokens: 50,
+    });
+    searchMock.mockResolvedValue(buildDiscoveryResult());
+    const { searchProspects } = await import("./discovery");
+    await searchProspects(validInput);
+    expect(searchMock).toHaveBeenCalledWith(validInput);
+  });
+
+  it("calls the provider on a cache miss and persists a result with at least one candidate", async () => {
+    searchMock.mockResolvedValue(buildDiscoveryResult());
+    const { searchProspects } = await import("./discovery");
+    const result = await searchProspects(validInput);
+
+    expect(searchMock).toHaveBeenCalledWith(validInput);
+    expect(cacheUpsertMock).toHaveBeenCalledTimes(1);
+    const upsertArgs = cacheUpsertMock.mock.calls[0]?.[0];
+    expect(upsertArgs.create).toMatchObject({
+      userId: "user_owner",
+      inputTokens: 100,
+      outputTokens: 50,
+    });
+    expect(result.status).toBe("success");
+  });
+
+  it("does not cache a result with zero valid candidates", async () => {
+    searchMock.mockResolvedValue(buildDiscoveryResult({ results: [] }));
+    const { searchProspects } = await import("./discovery");
+    const result = await searchProspects(validInput);
+
+    expect(cacheUpsertMock).not.toHaveBeenCalled();
+    expect(result.status).toBe("success");
+  });
+
+  it("does not cache a provider error and returns a safe error message", async () => {
+    const { DiscoveryGenerationError } = await import(
+      "../lib/discovery/generate"
+    );
+    searchMock.mockRejectedValue(new DiscoveryGenerationError("RATE_LIMITED"));
+    const { searchProspects } = await import("./discovery");
+    const result = await searchProspects(validInput);
+
+    expect(result.status).toBe("error");
+    expect(cacheUpsertMock).not.toHaveBeenCalled();
+  });
+
+  it("annotates every result with a duplicateProspectId computed against current owner prospects", async () => {
+    searchMock.mockResolvedValue(buildDiscoveryResult());
+    prospectFindManyMock.mockResolvedValue([
+      {
+        id: "existing_1",
+        businessName: "Ace Plumbing",
+        websiteUrl: "https://aceplumbing.com",
+        phone: null,
+        location: null,
+        sourceExternalId: null,
+      },
+    ]);
+    const { searchProspects } = await import("./discovery");
+    const result = await searchProspects(validInput);
+
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.result.duplicateProspectIds["aceplumbing.com"]).toBe(
+        "existing_1"
+      );
+    }
+  });
+
+  it("recomputes duplicate annotations fresh against current data even on a cache hit, not cached duplicate state", async () => {
+    cacheFindMock.mockResolvedValue({
+      result: buildDiscoveryResult(),
+      createdAt: new Date(),
+      inputTokens: 100,
+      outputTokens: 50,
+    });
+    // No matching prospect existed when this was cached, but one exists now.
+    prospectFindManyMock.mockResolvedValue([
+      {
+        id: "existing_new",
+        businessName: "Ace Plumbing",
+        websiteUrl: "https://aceplumbing.com",
+        phone: null,
+        location: null,
+        sourceExternalId: null,
+      },
+    ]);
+    const { searchProspects } = await import("./discovery");
+    const result = await searchProspects(validInput);
+
+    expect(searchMock).not.toHaveBeenCalled();
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.result.duplicateProspectIds["aceplumbing.com"]).toBe(
+        "existing_new"
+      );
+    }
+  });
+
+  it("returns a safe error when the AI Gateway model is not configured", async () => {
+    envMock.AI_GATEWAY_MODEL = undefined;
+    const { searchProspects } = await import("./discovery");
+    const result = await searchProspects(validInput);
+    expect(result.status).toBe("error");
+    expect(searchMock).not.toHaveBeenCalled();
+    expect(cacheFindMock).not.toHaveBeenCalled();
+  });
+});
