@@ -274,7 +274,7 @@ export const DiscoverResults = ({
                       title={eligible ? undefined : (reason ?? undefined)}
                     />
                   </TableCell>
-                  <TableCell className="max-w-40">
+                  <TableCell className="max-w-56">
                     <div
                       className="truncate font-medium"
                       title={candidate.businessName}
@@ -287,7 +287,7 @@ export const DiscoverResults = ({
                       </div>
                     ) : null}
                   </TableCell>
-                  <TableCell className="max-w-32">
+                  <TableCell className="max-w-48">
                     {candidate.websiteVerified && candidate.websiteUrl ? (
                       <a
                         className="block truncate underline"
@@ -308,7 +308,7 @@ export const DiscoverResults = ({
                     {candidate.phone ?? "—"}
                   </TableCell>
                   <TableCell
-                    className="max-w-32 truncate"
+                    className="max-w-48 truncate"
                     title={address ?? undefined}
                   >
                     {address ?? "—"}
@@ -318,7 +318,7 @@ export const DiscoverResults = ({
                       {candidate.confidence}
                     </Badge>
                   </TableCell>
-                  <TableCell className="max-w-28">
+                  <TableCell className="max-w-40">
                     <ul className="space-y-0.5">
                       {candidate.sourceUrls.map((sourceUrl) => (
                         <li className="truncate" key={sourceUrl}>
