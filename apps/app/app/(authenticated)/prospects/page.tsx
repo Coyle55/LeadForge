@@ -9,6 +9,7 @@ import {
   TableRow,
 } from "@repo/design-system/components/ui/table";
 import Link from "next/link";
+import { DiscoverButton } from "./discover-button";
 import { ListControls } from "./list-controls";
 import { Pagination } from "./pagination";
 import { getProspects, parseProspectListParams } from "./queries";
@@ -55,6 +56,7 @@ const ProspectsPage = async ({
               {total} matching record{total === 1 ? "" : "s"}
             </p>
           </div>
+          <DiscoverButton />
         </div>
       </div>
       <ListControls {...input} />
