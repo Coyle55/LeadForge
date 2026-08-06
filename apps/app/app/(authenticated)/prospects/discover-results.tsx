@@ -67,6 +67,16 @@ const confidenceVariant: Record<
   LOW: "outline",
 };
 
+const WWW_PREFIX_REGEX = /^www\./;
+
+const hostname = (url: string): string => {
+  try {
+    return new URL(url).hostname.replace(WWW_PREFIX_REGEX, "");
+  } catch {
+    return url;
+  }
+};
+
 const formatAddress = (candidate: DiscoveredProspect): string | null => {
   if (candidate.formattedAddress) {
     return candidate.formattedAddress;
@@ -214,7 +224,7 @@ export const DiscoverResults = ({
 
   return (
     <div className="space-y-3">
-      <div className="overflow-hidden rounded-lg border bg-card">
+      <div className="overflow-x-auto rounded-lg border bg-card">
         <Table>
           <TableHeader>
             <TableRow>
@@ -264,54 +274,68 @@ export const DiscoverResults = ({
                       title={eligible ? undefined : (reason ?? undefined)}
                     />
                   </TableCell>
-                  <TableCell>
-                    <div className="font-medium">{candidate.businessName}</div>
+                  <TableCell className="max-w-40">
+                    <div
+                      className="truncate font-medium"
+                      title={candidate.businessName}
+                    >
+                      {candidate.businessName}
+                    </div>
                     {candidate.category ? (
-                      <div className="text-muted-foreground text-xs">
+                      <div className="truncate text-muted-foreground text-xs">
                         {candidate.category}
                       </div>
                     ) : null}
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="max-w-32">
                     {candidate.websiteVerified && candidate.websiteUrl ? (
                       <a
-                        className="underline"
+                        className="block truncate underline"
                         href={candidate.websiteUrl}
                         rel="noreferrer"
                         target="_blank"
+                        title={candidate.websiteUrl}
                       >
-                        {candidate.websiteUrl}
+                        {hostname(candidate.websiteUrl)}
                       </a>
                     ) : (
-                      <Badge variant="outline">
-                        Official website not verified
+                      <Badge className="whitespace-nowrap" variant="outline">
+                        Not verified
                       </Badge>
                     )}
                   </TableCell>
-                  <TableCell>{candidate.phone ?? "—"}</TableCell>
-                  <TableCell>{address ?? "—"}</TableCell>
+                  <TableCell className="whitespace-nowrap">
+                    {candidate.phone ?? "—"}
+                  </TableCell>
+                  <TableCell
+                    className="max-w-32 truncate"
+                    title={address ?? undefined}
+                  >
+                    {address ?? "—"}
+                  </TableCell>
                   <TableCell>
                     <Badge variant={confidenceVariant[candidate.confidence]}>
                       {candidate.confidence}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="max-w-28">
                     <ul className="space-y-0.5">
                       {candidate.sourceUrls.map((sourceUrl) => (
-                        <li key={sourceUrl}>
+                        <li className="truncate" key={sourceUrl}>
                           <a
                             className="text-muted-foreground text-xs underline"
                             href={sourceUrl}
                             rel="noreferrer"
                             target="_blank"
+                            title={sourceUrl}
                           >
-                            {sourceUrl}
+                            {hostname(sourceUrl)}
                           </a>
                         </li>
                       ))}
                     </ul>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="whitespace-nowrap">
                     {duplicateId ? (
                       <Link
                         className="text-muted-foreground text-xs underline"
