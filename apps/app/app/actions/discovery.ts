@@ -4,6 +4,7 @@ import { isAllowedUserId } from "@repo/auth";
 import { auth } from "@repo/auth/server";
 import { database, type Prisma } from "@repo/database";
 import { logger } from "@repo/observability";
+import { prospectSchema } from "@repo/validation";
 import { z } from "zod";
 import { env } from "../../env";
 import { buildDiscoveryCacheKey } from "../lib/discovery/cache-key";
@@ -71,14 +72,11 @@ const resolveFailureCode = (error: unknown): string => {
   return rawCode in failureMessages ? rawCode : "INTERNAL_ERROR";
 };
 
-// Recomputes duplicate-status annotations against the owner's *current*
-// prospects. Deliberately never reads dedup state from the cache row --
-// dedup must reflect what exists right now even when the search results
-// themselves come from a cache hit made minutes/hours earlier.
-const annotateDuplicates = async (
-  userId: string,
-  results: DiscoveredProspect[]
-): Promise<Record<string, string | null>> => {
+// Fetches the owner's *current* prospects and builds a fresh identity
+// index from them. Shared by both preview-time duplicate annotation and
+// import-time re-checking so both always dedup against live data rather
+// than any snapshot taken earlier (e.g. from a cached search result).
+const fetchCurrentIdentityIndex = async (userId: string) => {
   const existingProspects = await database.prospect.findMany({
     where: { userId, archivedAt: null },
     select: {
@@ -90,17 +88,37 @@ const annotateDuplicates = async (
       sourceExternalId: true,
     },
   });
-  const identityIndex = buildExistingIdentityIndex(existingProspects);
+  return buildExistingIdentityIndex(existingProspects);
+};
+
+const findDuplicateForCandidate = (
+  candidate: DiscoveredProspect,
+  identityIndex: Awaited<ReturnType<typeof fetchCurrentIdentityIndex>>
+) =>
+  findDuplicateProspectId(
+    {
+      businessName: candidate.businessName,
+      formattedAddress: candidate.formattedAddress ?? null,
+      phone: candidate.phone ?? null,
+      providerCandidateId: candidate.providerCandidateId ?? null,
+      websiteUrl: candidate.websiteUrl ?? null,
+    },
+    identityIndex
+  );
+
+// Recomputes duplicate-status annotations against the owner's *current*
+// prospects. Deliberately never reads dedup state from the cache row --
+// dedup must reflect what exists right now even when the search results
+// themselves come from a cache hit made minutes/hours earlier.
+const annotateDuplicates = async (
+  userId: string,
+  results: DiscoveredProspect[]
+): Promise<Record<string, string | null>> => {
+  const identityIndex = await fetchCurrentIdentityIndex(userId);
   const duplicateProspectIds: Record<string, string | null> = {};
   for (const candidate of results) {
-    duplicateProspectIds[candidate.discoveryId] = findDuplicateProspectId(
-      {
-        businessName: candidate.businessName,
-        formattedAddress: candidate.formattedAddress ?? null,
-        phone: candidate.phone ?? null,
-        providerCandidateId: candidate.providerCandidateId ?? null,
-        websiteUrl: candidate.websiteUrl ?? null,
-      },
+    duplicateProspectIds[candidate.discoveryId] = findDuplicateForCandidate(
+      candidate,
       identityIndex
     );
   }
@@ -209,4 +227,137 @@ export const searchProspects = async (input: {
     status: "success",
     result: { ...discoveryResult, duplicateProspectIds },
   };
+};
+
+export interface ProspectImportBatchContext {
+  location: string;
+  provider: string;
+  query: string;
+  reasoningModel: string;
+  requestedCount: number;
+  returnedCount: number;
+}
+
+export type ImportProspectsResult =
+  | {
+      status: "success";
+      imported: string[];
+      skipped: string[];
+      failed: Array<{ discoveryId: string; reason: string }>;
+    }
+  | { status: "error"; message: string };
+
+// Persists a curated selection of discovery candidates as real Prospect
+// rows. Never trusts anything the client claims about a candidate's
+// preview-time status (duplicate/verification) -- both are re-derived here
+// from the current database state, because the client's copy of a
+// candidate can be stale (time has passed since the preview) or, in
+// principle, tampered with in transit.
+export const importProspects = async (
+  candidates: DiscoveredProspect[],
+  batchContext: ProspectImportBatchContext
+): Promise<ImportProspectsResult> => {
+  const userId = await authorize();
+  if (!userId) {
+    return { status: "error", message: "Not authorized." };
+  }
+
+  // The identity index is built once before the loop rather than refetched
+  // per candidate. This is safe: no candidate within a single import batch
+  // creates a Prospect that a *later* candidate in the same batch needs to
+  // dedup against -- cross-candidate duplicates within one human-curated
+  // selection are not a realistic concern. The idempotency requirement
+  // this guards against is re-importing the same candidate across
+  // *separate* calls, which is fully covered since this index is rebuilt
+  // fresh from the database on every call to this action.
+  const identityIndex = await fetchCurrentIdentityIndex(userId);
+
+  const imported: string[] = [];
+  const skipped: string[] = [];
+  const failed: Array<{ discoveryId: string; reason: string }> = [];
+
+  for (const candidate of candidates) {
+    const duplicateId = findDuplicateForCandidate(candidate, identityIndex);
+    if (duplicateId) {
+      skipped.push(candidate.discoveryId);
+      continue;
+    }
+
+    // Re-enforce website-verification eligibility server-side. A
+    // candidate can never be legitimately verified without a websiteUrl,
+    // so this checks both -- never trust a client-submitted
+    // `websiteVerified: true` flag alone.
+    if (!(candidate.websiteUrl && candidate.websiteVerified)) {
+      failed.push({
+        discoveryId: candidate.discoveryId,
+        reason: "Website not verified",
+      });
+      continue;
+    }
+
+    const parsed = prospectSchema.safeParse({
+      businessName: candidate.businessName,
+      businessCategory: null,
+      contactEmail: null,
+      contactName: null,
+      location: candidate.formattedAddress ?? null,
+      notes: null,
+      phone: candidate.phone ?? null,
+      websiteUrl: candidate.websiteUrl,
+    });
+    if (!parsed.success) {
+      failed.push({
+        discoveryId: candidate.discoveryId,
+        reason: parsed.error.issues.map((issue) => issue.message).join("; "),
+      });
+      continue;
+    }
+
+    try {
+      const prospect = await database.prospect.create({
+        data: {
+          userId,
+          ...parsed.data,
+          sourceProvider: batchContext.provider,
+          sourceExternalId: candidate.discoveryId,
+          sourceUrls: asJson(candidate.sourceUrls),
+          pipelineStage: "NEW",
+        },
+      });
+      imported.push(prospect.id);
+    } catch {
+      logger.error("discovery.import.candidate_failed", {
+        userId,
+        discoveryId: candidate.discoveryId,
+      });
+      failed.push({
+        discoveryId: candidate.discoveryId,
+        reason: "Unable to save prospect.",
+      });
+    }
+  }
+
+  await database.prospectImportBatch.create({
+    data: {
+      userId,
+      provider: batchContext.provider,
+      reasoningModel: batchContext.reasoningModel,
+      query: batchContext.query,
+      location: batchContext.location,
+      requestedCount: batchContext.requestedCount,
+      returnedCount: batchContext.returnedCount,
+      importedCount: imported.length,
+      skippedCount: skipped.length,
+      failedCount: failed.length,
+    },
+  });
+
+  logger.info("discovery.import.completed", {
+    userId,
+    importedCount: imported.length,
+    skippedCount: skipped.length,
+    failedCount: failed.length,
+  });
+
+  return { status: "success", imported, skipped, failed };
 };

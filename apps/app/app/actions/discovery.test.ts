@@ -1,9 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { DiscoveredProspect } from "../lib/discovery/types";
 
 const authMock = vi.fn();
 const cacheFindMock = vi.fn();
 const cacheUpsertMock = vi.fn();
 const prospectFindManyMock = vi.fn();
+const prospectCreateMock = vi.fn();
+const prospectImportBatchCreateMock = vi.fn();
 const searchMock = vi.fn();
 
 vi.mock("@repo/auth/server", () => ({ auth: authMock }));
@@ -16,7 +19,8 @@ vi.mock("@repo/database", () => ({
       findUnique: cacheFindMock,
       upsert: cacheUpsertMock,
     },
-    prospect: { findMany: prospectFindManyMock },
+    prospect: { findMany: prospectFindManyMock, create: prospectCreateMock },
+    prospectImportBatch: { create: prospectImportBatchCreateMock },
   },
 }));
 vi.mock("@repo/observability", () => ({
@@ -264,5 +268,201 @@ describe("searchProspects", () => {
     expect(result.status).toBe("error");
     expect(searchMock).not.toHaveBeenCalled();
     expect(cacheFindMock).not.toHaveBeenCalled();
+  });
+});
+
+const batchContext = {
+  query: "plumbers",
+  location: "Cincinnati, OH",
+  provider: "PERPLEXITY_GATEWAY_SEARCH",
+  reasoningModel: "anthropic/claude-haiku-4.5",
+  requestedCount: 10,
+  returnedCount: 1,
+};
+
+const buildCandidate = (
+  overrides: Partial<DiscoveredProspect> = {}
+): DiscoveredProspect => ({
+  discoveryId: "aceplumbing.com",
+  businessName: "Ace Plumbing",
+  websiteUrl: "https://aceplumbing.com",
+  websiteVerified: true,
+  sourceUrls: ["https://example.com/listing"],
+  confidence: "HIGH",
+  formattedAddress: "123 Main St, Cincinnati, OH",
+  phone: "555-1234",
+  ...overrides,
+});
+
+describe("importProspects", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    prospectFindManyMock.mockResolvedValue([]);
+    prospectCreateMock.mockImplementation(
+      ({ data }: { data: { businessName: string } }) =>
+        Promise.resolve({ id: `new_${data.businessName}` })
+    );
+    prospectImportBatchCreateMock.mockResolvedValue({ id: "batch_1" });
+  });
+
+  it("rejects an unauthenticated caller before touching the database", async () => {
+    authMock.mockResolvedValueOnce({ userId: null });
+    const { importProspects } = await import("./discovery");
+    const result = await importProspects([buildCandidate()], batchContext);
+    expect(result.status).toBe("error");
+    expect(prospectFindManyMock).not.toHaveBeenCalled();
+    expect(prospectCreateMock).not.toHaveBeenCalled();
+    expect(prospectImportBatchCreateMock).not.toHaveBeenCalled();
+  });
+
+  it("skips a candidate that was not a duplicate at preview time but has since become one", async () => {
+    prospectFindManyMock.mockResolvedValue([
+      {
+        id: "existing_1",
+        businessName: "Ace Plumbing",
+        websiteUrl: "https://aceplumbing.com",
+        phone: null,
+        location: null,
+        sourceExternalId: null,
+      },
+    ]);
+    const { importProspects } = await import("./discovery");
+    const result = await importProspects([buildCandidate()], batchContext);
+
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.skipped).toEqual(["aceplumbing.com"]);
+      expect(result.imported).toEqual([]);
+    }
+    expect(prospectCreateMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a candidate missing websiteUrl even if the client marked it as verified", async () => {
+    const candidate = buildCandidate({
+      websiteUrl: undefined,
+      websiteVerified: true,
+    });
+    const { importProspects } = await import("./discovery");
+    const result = await importProspects([candidate], batchContext);
+
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.failed).toEqual([
+        { discoveryId: "aceplumbing.com", reason: "Website not verified" },
+      ]);
+      expect(result.imported).toEqual([]);
+    }
+    expect(prospectCreateMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a candidate whose websiteVerified flag is false", async () => {
+    const candidate = buildCandidate({ websiteVerified: false });
+    const { importProspects } = await import("./discovery");
+    const result = await importProspects([candidate], batchContext);
+
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.failed).toEqual([
+        { discoveryId: "aceplumbing.com", reason: "Website not verified" },
+      ]);
+    }
+    expect(prospectCreateMock).not.toHaveBeenCalled();
+  });
+
+  it("isolates a Zod validation failure to one candidate without stopping the rest of the batch", async () => {
+    const badCandidate = buildCandidate({
+      discoveryId: "toolongname.com",
+      businessName: "x".repeat(161),
+    });
+    const goodCandidate = buildCandidate({
+      discoveryId: "goodplumbing.com",
+      businessName: "Good Plumbing",
+      websiteUrl: "https://goodplumbing.com",
+    });
+    const { importProspects } = await import("./discovery");
+    const result = await importProspects(
+      [badCandidate, goodCandidate],
+      batchContext
+    );
+
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.failed).toHaveLength(1);
+      expect(result.failed[0]?.discoveryId).toBe("toolongname.com");
+      expect(result.imported).toEqual(["new_Good Plumbing"]);
+    }
+    expect(prospectCreateMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists a ProspectImportBatch row with accurate counts", async () => {
+    const duplicateCandidate = buildCandidate({
+      discoveryId: "dupe.com",
+      websiteUrl: "https://dupe.com",
+    });
+    const failingCandidate = buildCandidate({
+      discoveryId: "bad.com",
+      businessName: "",
+      websiteUrl: "https://bad.com",
+    });
+    const goodCandidate = buildCandidate({
+      discoveryId: "good.com",
+      businessName: "Good Plumbing",
+      websiteUrl: "https://good.com",
+    });
+    prospectFindManyMock.mockResolvedValue([
+      {
+        id: "existing_dupe",
+        businessName: "Ace Plumbing",
+        websiteUrl: "https://dupe.com",
+        phone: null,
+        location: null,
+        sourceExternalId: null,
+      },
+    ]);
+    const { importProspects } = await import("./discovery");
+    const result = await importProspects(
+      [duplicateCandidate, failingCandidate, goodCandidate],
+      batchContext
+    );
+
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(result.skipped).toEqual(["dupe.com"]);
+      expect(result.failed).toHaveLength(1);
+      expect(result.imported).toHaveLength(1);
+    }
+    expect(prospectImportBatchCreateMock).toHaveBeenCalledTimes(1);
+    expect(prospectImportBatchCreateMock).toHaveBeenCalledWith({
+      data: {
+        userId: "user_owner",
+        provider: batchContext.provider,
+        reasoningModel: batchContext.reasoningModel,
+        query: batchContext.query,
+        location: batchContext.location,
+        requestedCount: batchContext.requestedCount,
+        returnedCount: batchContext.returnedCount,
+        importedCount: 1,
+        skippedCount: 1,
+        failedCount: 1,
+      },
+    });
+  });
+
+  it("sets sourceProvider/sourceExternalId/sourceUrls/pipelineStage correctly on the created prospect", async () => {
+    const candidate = buildCandidate();
+    const { importProspects } = await import("./discovery");
+    await importProspects([candidate], batchContext);
+
+    expect(prospectCreateMock).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: "user_owner",
+        businessName: "Ace Plumbing",
+        sourceProvider: batchContext.provider,
+        sourceExternalId: "aceplumbing.com",
+        sourceUrls: ["https://example.com/listing"],
+        pipelineStage: "NEW",
+      }),
+    });
   });
 });
