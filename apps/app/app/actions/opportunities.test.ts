@@ -41,7 +41,7 @@ vi.mock("../lib/opportunity/generate", async (importOriginal) => {
   return { ...actual, generateInterpretation: generateMock };
 });
 vi.mock("../lib/opportunity/prompt", () => ({
-  INTERPRETATION_PROMPT_VERSION: "interpretation-v1",
+  INTERPRETATION_PROMPT_VERSION: "interpretation-v2",
 }));
 vi.mock("../../env", () => ({
   env: { AI_GATEWAY_MODEL: "openai/test-model" },

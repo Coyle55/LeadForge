@@ -87,7 +87,7 @@ describe("generateInterpretation", () => {
         return () => (time += 25);
       })(),
     });
-    expect(INTERPRETATION_PROMPT_VERSION).toBe("interpretation-v1");
+    expect(INTERPRETATION_PROMPT_VERSION).toBe("interpretation-v2");
     expect(generate).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "openai/test-model",
