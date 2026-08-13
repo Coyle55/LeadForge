@@ -30,11 +30,20 @@ export const config: NextConfig = {
   turbopack: {
     root: monorepoRoot,
   },
-  // Bun only links these into packages/database/node_modules, not hoisted
-  // to a workspace root -- without this, Turbopack's dev-mode external
-  // module handling for server-only packages resolves them to an internal
-  // content-hashed specifier (e.g. "@prisma/client-<hash>/runtime/client")
-  // that Node can never actually find at runtime.
+  // Turbopack dev mode cannot run in this app -- confirmed a genuine,
+  // currently-unfixed upstream bug (prisma/prisma#28956, #29025;
+  // vercel/next.js#87737, #86866, all open), not a local config issue.
+  // Turbopack auto-externalizes @prisma/client/@prisma/adapter-pg/pg
+  // (they have dynamic requires it flags automatically) and computes an
+  // internal content-hashed specifier for each (e.g.
+  // "@prisma/client-<hash>/runtime/client") that nothing at runtime can
+  // ever resolve. Tried and confirmed NOT to fix it: serverExternalPackages
+  // alone, serverExternalPackages + turbopack.resolveAlias (both absolute
+  // and relative path forms), and removing serverExternalPackages entirely
+  // to force full bundling instead. `bun run dev` therefore runs Next with
+  // `--webpack` (see apps/app/package.json) until upstream fixes this.
+  // serverExternalPackages here still matters for the real webpack build
+  // (`next build`/`next start`), unaffected by the Turbopack-specific bug.
   serverExternalPackages: ["@prisma/client", "@prisma/adapter-pg", "pg"],
 };
 
