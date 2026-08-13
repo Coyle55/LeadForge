@@ -45,7 +45,7 @@ enum ProspectActivityType {
 }
 
 model Prospect {
-  id               String             @id @default(cuid())
+  id               String                @id @default(cuid())
   userId           String
   businessName     String
   websiteUrl       String?
@@ -54,22 +54,36 @@ model Prospect {
   phone            String?
   location         String?
   notes            String?
-  pipelineStage    PipelineStage      @default(NEW)
+  pipelineStage    PipelineStage         @default(NEW)
   businessCategory BusinessCategory?
   lastContactedAt  DateTime?
   archivedAt       DateTime?
   sourceProvider   String?
   sourceExternalId String?
   sourceUrls       Json?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
   deal             Deal?
   tasks            Task[]
+  stageChanges     PipelineStageChange[]
   activities       ProspectActivity[]
 
   @@index([userId, archivedAt])
   @@index([userId, pipelineStage])
   @@index([userId, createdAt])
+}
+
+model PipelineStageChange {
+  id         String         @id @default(cuid())
+  userId     String
+  prospectId String
+  fromStage  PipelineStage?
+  toStage    PipelineStage
+  changedAt  DateTime       @default(now())
+  prospect   Prospect       @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([userId, prospectId, changedAt])
+  @@index([userId, toStage, changedAt])
 }
 
 model ProspectActivity {

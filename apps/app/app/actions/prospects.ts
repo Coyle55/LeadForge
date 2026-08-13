@@ -110,8 +110,19 @@ export const createProspect = async (
 
   let prospectId: string;
   try {
-    const prospect = await database.prospect.create({
-      data: { userId, ...parsed.data },
+    const prospect = await database.$transaction(async (transaction) => {
+      const created = await transaction.prospect.create({
+        data: { userId, ...parsed.data },
+      });
+      await transaction.pipelineStageChange.create({
+        data: {
+          userId,
+          prospectId: created.id,
+          fromStage: null,
+          toStage: "NEW",
+        },
+      });
+      return created;
     });
     prospectId = prospect.id;
   } catch {

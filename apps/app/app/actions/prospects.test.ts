@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const authMock = vi.fn();
 const createMock = vi.fn();
 const updateManyMock = vi.fn();
+const stageChangeCreateMock = vi.fn();
+const transactionMock = vi.fn();
 const logInfoMock = vi.fn();
 const logErrorMock = vi.fn();
 const revalidatePathMock = vi.fn();
@@ -14,7 +16,8 @@ vi.mock("@repo/auth", () => ({
 }));
 vi.mock("@repo/database", () => ({
   database: {
-    prospect: { create: createMock, updateMany: updateManyMock },
+    $transaction: transactionMock,
+    prospect: { updateMany: updateManyMock },
   },
 }));
 vi.mock("@repo/observability", () => ({
@@ -46,6 +49,18 @@ describe("prospect actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.ALLOWED_USER_IDS = "user_owner";
+    transactionMock.mockImplementation(
+      async (
+        callback: (client: {
+          pipelineStageChange: { create: typeof stageChangeCreateMock };
+          prospect: { create: typeof createMock };
+        }) => unknown
+      ) =>
+        await callback({
+          prospect: { create: createMock },
+          pipelineStageChange: { create: stageChangeCreateMock },
+        })
+    );
   });
 
   it("denies signed-out and non-owner creation without writing", async () => {
@@ -58,10 +73,10 @@ describe("prospect actions", () => {
     await expect(createProspect({}, form(valid))).resolves.toMatchObject({
       status: "error",
     });
-    expect(createMock).not.toHaveBeenCalled();
+    expect(transactionMock).not.toHaveBeenCalled();
   });
 
-  it("creates for the authenticated owner and normalizes fields", async () => {
+  it("creates for the authenticated owner, normalizes fields, and logs the initial stage", async () => {
     authMock.mockResolvedValue({ userId: "user_owner" });
     createMock.mockResolvedValue({ id: "prospect_1" });
     const { createProspect } = await import("./prospects");
@@ -78,6 +93,14 @@ describe("prospect actions", () => {
         location: "Boston",
         notes: null,
         businessCategory: null,
+      },
+    });
+    expect(stageChangeCreateMock).toHaveBeenCalledWith({
+      data: {
+        userId: "user_owner",
+        prospectId: "prospect_1",
+        fromStage: null,
+        toStage: "NEW",
       },
     });
     expect(redirectMock).toHaveBeenCalledWith(

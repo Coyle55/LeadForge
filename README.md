@@ -1,6 +1,6 @@
 # LeadForge
 
-LeadForge is a private, single-owner lead workspace. M0 established authentication and persistence, M1 added manual prospect management, M2 added deterministic website audits, M3 turns completed audit evidence into AI-generated opportunity scoring and recommendations, M4 prepares editable outreach drafts from one selected recommendation, M5 adds a fixed sales pipeline, one optional Deal per prospect, and manual follow-up Tasks, and Phase 3 adds AI-powered prospect discovery: search for real local businesses by type and location, review AI-discovered candidates with their supporting evidence, and import only the ones worth pursuing.
+LeadForge is a private, single-owner lead workspace. M0 established authentication and persistence, M1 added manual prospect management, M2 added deterministic website audits, M3 turns completed audit evidence into AI-generated opportunity scoring and recommendations, M4 prepares editable outreach drafts from one selected recommendation, M5 adds a fixed sales pipeline, one optional Deal per prospect, and manual follow-up Tasks, M6 adds a Reports dashboard with pipeline funnel/conversion, win-rate, revenue, and activity trends over the trailing 12 months, and Phase 3 adds AI-powered prospect discovery: search for real local businesses by type and location, review AI-discovered candidates with their supporting evidence, and import only the ones worth pursuing.
 
 ## Requirements
 
@@ -46,6 +46,7 @@ The authenticated application routes are:
 - `/opportunities/[id]` — evidence-linked score and recommendations
 - `/outreach` — completed and failed outreach-draft history
 - `/outreach/[id]` — edit, copy, reset, or mark an evidence-grounded draft sent (recording `lastContactedAt`, a `ProspectActivity` entry, and an optional follow-up task)
+- `/reports` — pipeline funnel/conversion, win rate, revenue, and activity trends over the trailing 12 months
 - `/settings` — update the owner's display name and Outreach Profile
 
 ## Commands
