@@ -43,7 +43,7 @@ const FieldError = ({ errors, id }: { errors?: string[]; id: string }) =>
     </p>
   ) : null;
 
-export const DiscoverModal = () => {
+export const DiscoverModal = ({ onClose }: { onClose?: () => void }) => {
   const searchRevisionRef = useRef(0);
   const search = useCallback(
     async (
@@ -193,6 +193,7 @@ export const DiscoverModal = () => {
           candidates={state.result.results}
           duplicateProspectIds={state.result.duplicateProspectIds}
           key={state.searchRevision}
+          onClose={onClose}
         />
       ) : null}
     </DialogContent>

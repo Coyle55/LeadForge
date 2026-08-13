@@ -32,7 +32,7 @@ export const DiscoverButton = () => {
           Discover prospects
         </Button>
       </DialogTrigger>
-      <DiscoverModal key={openCount} />
+      <DiscoverModal key={openCount} onClose={() => setOpen(false)} />
     </Dialog>
   );
 };

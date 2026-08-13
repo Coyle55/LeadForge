@@ -12,7 +12,7 @@ import {
   TableRow,
 } from "@repo/design-system/components/ui/table";
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   type ImportAndAuditProspectsResult,
   type ImportProspectsResult,
@@ -94,15 +94,20 @@ const businessNameByDiscoveryId = (candidates: DiscoveredProspect[]) =>
 
 const ImportSummary = ({
   candidates,
+  onClose,
   outcome,
+  summaryRef,
 }: {
   candidates: DiscoveredProspect[];
+  onClose?: () => void;
   outcome: ImportOutcome;
+  summaryRef: React.RefObject<HTMLElement | null>;
 }) => {
   if (outcome.status === "error") {
     return (
       <p
         className="rounded-md bg-destructive/8 px-3 py-2 text-destructive text-sm"
+        ref={summaryRef as React.RefObject<HTMLParagraphElement>}
         role="alert"
       >
         {outcome.message}
@@ -112,14 +117,40 @@ const ImportSummary = ({
 
   const byId = businessNameByDiscoveryId(candidates);
   const audits = "audits" in outcome ? outcome.audits : null;
+  const auditsFailed =
+    audits?.some((audit) => audit.status === "failed") ?? false;
+  const isCleanSuccess =
+    outcome.skipped.length === 0 &&
+    outcome.failed.length === 0 &&
+    !auditsFailed;
 
   return (
-    <output className="block space-y-2 rounded-md border border-border/70 bg-muted/30 p-3 text-sm">
-      <p className="font-medium">
-        Imported {outcome.imported.length}, skipped {outcome.skipped.length},
-        failed {outcome.failed.length}
-        {audits ? `, audited ${audits.length}` : ""}.
-      </p>
+    <output
+      className={
+        isCleanSuccess
+          ? "block space-y-2 rounded-md border border-emerald-600/30 bg-emerald-500/10 p-3 text-sm"
+          : "block space-y-2 rounded-md border border-border/70 bg-muted/30 p-3 text-sm"
+      }
+      ref={summaryRef as React.RefObject<HTMLOutputElement>}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <p
+          className={
+            isCleanSuccess
+              ? "font-medium text-emerald-700 dark:text-emerald-400"
+              : "font-medium"
+          }
+        >
+          {isCleanSuccess ? "✓ " : ""}Imported {outcome.imported.length},
+          skipped {outcome.skipped.length}, failed {outcome.failed.length}
+          {audits ? `, audited ${audits.length}` : ""}.
+        </p>
+        {onClose ? (
+          <Button onClick={onClose} size="sm" type="button" variant="outline">
+            Close
+          </Button>
+        ) : null}
+      </div>
       {outcome.skipped.length > 0 ? (
         <p className="text-muted-foreground text-xs">
           Skipped (already imported):{" "}
@@ -157,10 +188,12 @@ export const DiscoverResults = ({
   batchContext,
   candidates,
   duplicateProspectIds,
+  onClose,
 }: {
   batchContext: ProspectImportBatchContext;
   candidates: DiscoveredProspect[];
   duplicateProspectIds: DuplicateProspectIds;
+  onClose?: () => void;
 }) => {
   // Selection is tracked by array index, not discoveryId: two distinct
   // physical locations can legitimately share one discoveryId when they
@@ -172,6 +205,25 @@ export const DiscoverResults = ({
   );
   const [outcome, setOutcome] = useState<ImportOutcome | null>(null);
   const [pending, startTransition] = useTransition();
+  const summaryRef = useRef<HTMLElement | null>(null);
+
+  // The result table above keeps showing the same rows/checkboxes after a
+  // successful import (the just-imported businesses only disappear from
+  // the "New" state on the *next* fresh search), which reads as if nothing
+  // happened. Scroll the outcome into view and clear the now-stale
+  // selection so it's unambiguous the action actually completed.
+  useEffect(() => {
+    if (!outcome) {
+      return;
+    }
+    summaryRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+    });
+    if (outcome.status !== "error") {
+      setSelectedIndices(new Set());
+    }
+  }, [outcome]);
 
   const eligibleIndices = useMemo(
     () =>
@@ -389,7 +441,12 @@ export const DiscoverResults = ({
         </output>
       </div>
       {outcome ? (
-        <ImportSummary candidates={candidates} outcome={outcome} />
+        <ImportSummary
+          candidates={candidates}
+          onClose={onClose}
+          outcome={outcome}
+          summaryRef={summaryRef}
+        />
       ) : null}
     </div>
   );
