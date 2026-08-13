@@ -1,42 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { generateOpportunity, OpportunityGenerationError } from "./generate";
-import { OPPORTUNITY_PROMPT_VERSION } from "./prompt";
+import {
+  generateInterpretation,
+  InterpretationGenerationError,
+} from "./generate";
+import { INTERPRETATION_PROMPT_VERSION } from "./prompt";
 
 const input = {
   prospectName: "Acme",
   hostname: "example.com",
-  audit: {
-    auditedAt: "2026-08-04T12:00:00.000Z",
-    pagesAudited: 1,
-    pagesAttempted: 1,
-    durationMs: 100,
-  },
-  checks: [
-    {
-      key: "contact_path",
-      category: "TRUST",
-      status: "FAIL",
-      summary: "Missing",
-      evidence: { found: false },
-    },
-    {
-      key: "structured_data",
-      category: "SEO",
-      status: "FAIL",
-      summary: "Missing",
-      evidence: { blocks: 0 },
-    },
-    {
-      key: "meta_description",
-      category: "ACCESSIBILITY",
-      status: "WARNING",
-      summary: "Partial",
-      evidence: { pages: 2 },
-    },
-  ],
-};
-
-const output = {
+  tier: "HIGH" as const,
   overallScore: 72,
   categoryScores: {
     accessibility: 60,
@@ -45,50 +17,69 @@ const output = {
     technical: 75,
     performance: 65,
   },
-  executiveSummary:
-    "This website presents a strong addressable opportunity supported by several audit findings.",
-  overallRationale:
-    "Trust and technical findings create the clearest near-term opportunity while several checks already pass.",
+  topReasons: [
+    {
+      category: "TRUST",
+      checkKey: "contact_path",
+      points: 15,
+      evidence: { found: false },
+    },
+  ],
   recommendations: [
     {
-      title: "Strengthen contact paths",
-      impact: "HIGH",
+      serviceCategory: "LEAD_CAPTURE_REPAIR",
+      weight: 5,
       effort: "LOW",
-      rationale:
-        "The contact-path check failed and limits clear conversion routes.",
-      action: "Add a prominent contact action to the header and service pages.",
-      auditCheckKeys: ["contact_path"],
-    },
-    {
-      title: "Add structured data",
       impact: "MEDIUM",
-      effort: "MEDIUM",
-      rationale:
-        "The structured-data check indicates no discoverable business schema.",
-      action:
-        "Publish valid LocalBusiness JSON-LD matching visible business details.",
-      auditCheckKeys: ["structured_data"],
+      confidence: "MEDIUM",
+      supportingCheckKeys: ["contact_path"],
     },
+  ],
+  allowedNumbers: [
+    "0",
+    "1",
+    "2",
+    "100",
+    "72",
+    "60",
+    "80",
+    "70",
+    "75",
+    "65",
+    "15",
+    "5",
+  ],
+  expectedServiceCategories: ["LEAD_CAPTURE_REPAIR"],
+};
+
+const output = {
+  summary:
+    "This website presents a strong addressable opportunity supported by several audit findings, scoring 72 overall.",
+  strongestIssue: "The contact-path check failed, worth 15 points.",
+  practicalImpact:
+    "Missing contact paths limit clear conversion routes for potential customers.",
+  suggestedOffer: "A focused lead-capture repair engagement.",
+  confidence: "MEDIUM" as const,
+  warnings: [],
+  recommendations: [
     {
-      title: "Improve page descriptions",
-      impact: "MEDIUM",
-      effort: "LOW",
+      serviceCategory: "LEAD_CAPTURE_REPAIR",
+      title: "Repair your lead-capture path",
       rationale:
-        "Missing descriptions weaken how audited pages communicate their purpose.",
+        "The contact-path check failed, which limits clear conversion routes for visitors.",
       action:
-        "Write unique descriptions for each audited page based on its service intent.",
-      auditCheckKeys: ["meta_description"],
+        "Add a prominent, working contact action to the header and service pages.",
     },
   ],
 };
 
-describe("generateOpportunity", () => {
-  it("uses the configured model, rubric, structured output, no retries, and bounded telemetry", async () => {
+describe("generateInterpretation", () => {
+  it("uses the configured model, bounded prompt, structured output, no retries, and bounded telemetry", async () => {
     const generate = vi.fn().mockResolvedValue({
       output,
       usage: { inputTokens: 100, outputTokens: 80 },
     });
-    const result = await generateOpportunity(input, {
+    const result = await generateInterpretation(input, {
       model: "openai/test-model",
       generate,
       now: (() => {
@@ -96,7 +87,7 @@ describe("generateOpportunity", () => {
         return () => (time += 25);
       })(),
     });
-    expect(OPPORTUNITY_PROMPT_VERSION).toBe("opportunity-v1");
+    expect(INTERPRETATION_PROMPT_VERSION).toBe("interpretation-v2");
     expect(generate).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "openai/test-model",
@@ -106,7 +97,7 @@ describe("generateOpportunity", () => {
       })
     );
     expect(generate.mock.calls[0]?.[0].system).toContain(
-      "addressable sales opportunity"
+      "ALREADY-COMPUTED deterministic score"
     );
     expect(generate.mock.calls[0]?.[0].prompt).not.toContain("userId");
     expect(result).toMatchObject({
@@ -117,9 +108,9 @@ describe("generateOpportunity", () => {
     });
   });
 
-  it("maps rate limits and invalid evidence to safe typed errors", async () => {
+  it("maps rate limits and unlisted numbers to safe typed errors", async () => {
     await expect(
-      generateOpportunity(input, {
+      generateInterpretation(input, {
         model: "test",
         generate: vi
           .fn()
@@ -129,18 +120,28 @@ describe("generateOpportunity", () => {
       })
     ).rejects.toMatchObject({ code: "RATE_LIMITED" });
     await expect(
-      generateOpportunity(input, {
+      generateInterpretation(input, {
         model: "test",
         generate: vi.fn().mockResolvedValue({
           output: {
             ...output,
-            recommendations: output.recommendations.map((item, index) =>
-              index ? item : { ...item, auditCheckKeys: ["invented"] }
-            ),
+            summary: `${output.summary} Traffic could rise 4200%.`,
           },
           usage: {},
         }),
       })
-    ).rejects.toBeInstanceOf(OpportunityGenerationError);
+    ).rejects.toBeInstanceOf(InterpretationGenerationError);
+  });
+
+  it("classifies a service-category mismatch as INVALID_OUTPUT", async () => {
+    await expect(
+      generateInterpretation(input, {
+        model: "test",
+        generate: vi.fn().mockResolvedValue({
+          output: { ...output, recommendations: [] },
+          usage: {},
+        }),
+      })
+    ).rejects.toMatchObject({ code: "INVALID_OUTPUT" });
   });
 });

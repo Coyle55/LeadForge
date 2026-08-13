@@ -1,88 +1,183 @@
 import { describe, expect, it } from "vitest";
-import { validateOpportunityOutput } from "./schema";
+import { validateInterpretationOutput } from "./schema";
+
+const allowedNumbers = new Set([
+  "0",
+  "1",
+  "2",
+  "100",
+  "72",
+  "60",
+  "80",
+  "70",
+  "75",
+  "65",
+  "15",
+  "5",
+]);
+const expectedServiceCategories = ["LEAD_CAPTURE_REPAIR"];
+const UNLISTED_NUMBER_ERROR = /unlisted number/i;
+const EXPECTED_SERVICE_CATEGORIES_ERROR = /expected service categories/i;
 
 const valid = {
-  overallScore: 72,
-  categoryScores: {
-    accessibility: 60,
-    trust: 80,
-    seo: 70,
-    technical: 75,
-    performance: 65,
-  },
-  executiveSummary:
-    "This website presents a strong addressable opportunity supported by several audit findings.",
-  overallRationale:
-    "Trust and technical findings create the clearest near-term opportunity while several checks already pass.",
+  summary:
+    "This website presents a strong addressable opportunity supported by several audit findings, scoring 72 overall.",
+  strongestIssue: "The contact-path check failed, worth 15 points.",
+  practicalImpact:
+    "Missing contact paths limit clear conversion routes for potential customers.",
+  suggestedOffer: "A focused lead-capture repair engagement.",
+  confidence: "MEDIUM" as const,
+  warnings: [],
   recommendations: [
     {
-      title: "Strengthen contact paths",
-      impact: "HIGH",
-      effort: "LOW",
+      serviceCategory: "LEAD_CAPTURE_REPAIR" as const,
+      title: "Repair your lead-capture path",
       rationale:
-        "The contact-path check failed and limits clear conversion routes.",
-      action: "Add a prominent contact action to the header and service pages.",
-      auditCheckKeys: ["contact_path"],
-    },
-    {
-      title: "Add structured data",
-      impact: "MEDIUM",
-      effort: "MEDIUM",
-      rationale:
-        "The structured-data check indicates no discoverable business schema.",
+        "The contact-path check failed, which limits clear conversion routes for visitors.",
       action:
-        "Publish valid LocalBusiness JSON-LD matching visible business details.",
-      auditCheckKeys: ["structured_data"],
-    },
-    {
-      title: "Improve page descriptions",
-      impact: "MEDIUM",
-      effort: "LOW",
-      rationale:
-        "Missing descriptions weaken how audited pages communicate their purpose.",
-      action:
-        "Write unique descriptions for each audited page based on its service intent.",
-      auditCheckKeys: ["meta_description"],
+        "Add a prominent, working contact action to the header and service pages.",
     },
   ],
 };
 
-describe("validateOpportunityOutput", () => {
-  it("accepts a complete evidence-linked result", () => {
+describe("validateInterpretationOutput", () => {
+  it("accepts prose whose numbers are all present in allowedNumbers and whose recommendations exactly match", () => {
     expect(
-      validateOpportunityOutput(
+      validateInterpretationOutput(
         valid,
-        new Set(["contact_path", "structured_data", "meta_description"])
+        allowedNumbers,
+        expectedServiceCategories
       )
     ).toEqual(valid);
   });
 
-  it("rejects scores and references outside the source audit", () => {
+  it("rejects malformed shapes", () => {
     expect(() =>
-      validateOpportunityOutput(
-        { ...valid, overallScore: 101 },
-        new Set(["contact_path"])
+      validateInterpretationOutput(
+        { ...valid, confidence: "URGENT" },
+        allowedNumbers,
+        expectedServiceCategories
       )
-    ).toThrow();
-    expect(() =>
-      validateOpportunityOutput(valid, new Set(["contact_path"]))
     ).toThrow();
   });
 
-  it("rejects duplicate recommendation titles", () => {
-    const duplicate = {
+  it("rejects prose that introduces a number absent from allowedNumbers", () => {
+    const withInventedNumber = {
+      ...valid,
+      summary: `${valid.summary} Traffic could rise 4200%.`,
+    };
+    expect(() =>
+      validateInterpretationOutput(
+        withInventedNumber,
+        allowedNumbers,
+        expectedServiceCategories
+      )
+    ).toThrow(UNLISTED_NUMBER_ERROR);
+  });
+
+  it("rejects a number invented inside recommendation copy, not just the overall-summary fields", () => {
+    const withInventedNumber = {
       ...valid,
       recommendations: [
-        valid.recommendations[0],
-        { ...valid.recommendations[1], title: "STRENGTHEN CONTACT PATHS" },
-        valid.recommendations[2],
+        {
+          ...valid.recommendations[0],
+          action: `${valid.recommendations[0].action} Expect a 4200% lift.`,
+        },
       ],
     };
     expect(() =>
-      validateOpportunityOutput(
-        duplicate,
-        new Set(["contact_path", "structured_data", "meta_description"])
+      validateInterpretationOutput(
+        withInventedNumber,
+        allowedNumbers,
+        expectedServiceCategories
       )
-    ).toThrow();
+    ).toThrow(UNLISTED_NUMBER_ERROR);
+  });
+
+  it("accepts a percent-suffixed number when its bare form is allowed", () => {
+    const withPercent = {
+      ...valid,
+      practicalImpact: `${valid.practicalImpact} This affects roughly 72% of the experience.`,
+    };
+    expect(
+      validateInterpretationOutput(
+        withPercent,
+        allowedNumbers,
+        expectedServiceCategories
+      )
+    ).toEqual(withPercent);
+  });
+
+  it("rejects recommendations missing an expected service category", () => {
+    expect(() =>
+      validateInterpretationOutput(
+        { ...valid, recommendations: [] },
+        allowedNumbers,
+        expectedServiceCategories
+      )
+    ).toThrow(EXPECTED_SERVICE_CATEGORIES_ERROR);
+  });
+
+  it("rejects recommendations that include an extra, unexpected service category", () => {
+    const withExtra = {
+      ...valid,
+      recommendations: [
+        ...valid.recommendations,
+        {
+          serviceCategory: "PERFORMANCE_OPTIMIZATION" as const,
+          title: "Speed up key pages",
+          rationale:
+            "Server response time checks show room to improve load speed.",
+          action: "Optimize the slowest server responses on key landing pages.",
+        },
+      ],
+    };
+    expect(() =>
+      validateInterpretationOutput(
+        withExtra,
+        allowedNumbers,
+        expectedServiceCategories
+      )
+    ).toThrow(EXPECTED_SERVICE_CATEGORIES_ERROR);
+  });
+
+  it("rejects a recommendation whose service category is wrong even though the count matches", () => {
+    const withWrongCategory = {
+      ...valid,
+      recommendations: [
+        {
+          ...valid.recommendations[0],
+          serviceCategory: "BOOKING_INTEGRATION" as const,
+        },
+      ],
+    };
+    expect(() =>
+      validateInterpretationOutput(
+        withWrongCategory,
+        allowedNumbers,
+        expectedServiceCategories
+      )
+    ).toThrow(EXPECTED_SERVICE_CATEGORIES_ERROR);
+  });
+
+  it("rejects a duplicated service category even when the expected set would otherwise match", () => {
+    const duplicated = {
+      ...valid,
+      recommendations: [valid.recommendations[0], valid.recommendations[0]],
+    };
+    expect(() =>
+      validateInterpretationOutput(
+        duplicated,
+        allowedNumbers,
+        expectedServiceCategories
+      )
+    ).toThrow(EXPECTED_SERVICE_CATEGORIES_ERROR);
+  });
+
+  it("accepts zero recommendations when zero are expected", () => {
+    const noRecommendations = { ...valid, recommendations: [] };
+    expect(
+      validateInterpretationOutput(noRecommendations, allowedNumbers, [])
+    ).toEqual(noRecommendations);
   });
 });

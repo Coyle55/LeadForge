@@ -9,6 +9,7 @@ import { ProspectForm } from "../prospect-form";
 
 const empty = {
   businessName: "",
+  businessCategory: "",
   websiteUrl: "",
   contactName: "",
   contactEmail: "",

@@ -32,8 +32,27 @@ const optionalEmail = z.preprocess(
   z.string().trim().toLowerCase().email().nullable()
 );
 
+const BUSINESS_CATEGORIES = [
+  "SALON_SPA",
+  "MEDICAL_DENTAL",
+  "HOME_SERVICES",
+  "AUTOMOTIVE",
+  "FITNESS",
+  "LEGAL_FINANCIAL",
+  "RESTAURANT_FOOD",
+  "RETAIL",
+  "PROFESSIONAL_SERVICES",
+  "OTHER",
+] as const;
+
+const optionalBusinessCategory = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? null : value),
+  z.enum(BUSINESS_CATEGORIES).nullable()
+);
+
 export const prospectSchema = z.object({
   businessName: z.string().trim().min(1).max(160),
+  businessCategory: optionalBusinessCategory,
   contactEmail: optionalEmail,
   contactName: optionalText(160),
   location: optionalText(240),

@@ -39,6 +39,7 @@ const valid = {
   phone: "",
   location: "Boston",
   notes: "",
+  businessCategory: "",
 };
 
 describe("prospect actions", () => {
@@ -76,6 +77,7 @@ describe("prospect actions", () => {
         phone: null,
         location: "Boston",
         notes: null,
+        businessCategory: null,
       },
     });
     expect(redirectMock).toHaveBeenCalledWith(
@@ -83,6 +85,17 @@ describe("prospect actions", () => {
     );
     expect(revalidatePathMock).toHaveBeenCalledWith("/prospects");
     expect(revalidatePathMock).toHaveBeenCalledWith("/pipeline");
+  });
+
+  it("accepts a valid businessCategory value", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    createMock.mockResolvedValue({ id: "prospect_1" });
+    const { createProspect } = await import("./prospects");
+
+    await createProspect({}, form({ ...valid, businessCategory: "SALON_SPA" }));
+    expect(createMock).toHaveBeenCalledWith({
+      data: expect.objectContaining({ businessCategory: "SALON_SPA" }),
+    });
   });
 
   it("returns field errors for invalid input", async () => {
@@ -96,6 +109,19 @@ describe("prospect actions", () => {
     expect(result).toMatchObject({ status: "error" });
     expect(result.fieldErrors).toHaveProperty("businessName");
     expect(result.fieldErrors).toHaveProperty("websiteUrl");
+    expect(createMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid businessCategory enum value with a field error", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    const { createProspect } = await import("./prospects");
+
+    const result = await createProspect(
+      {},
+      form({ ...valid, businessCategory: "NOT_A_REAL_CATEGORY" })
+    );
+    expect(result).toMatchObject({ status: "error" });
+    expect(result.fieldErrors).toHaveProperty("businessCategory");
     expect(createMock).not.toHaveBeenCalled();
   });
 

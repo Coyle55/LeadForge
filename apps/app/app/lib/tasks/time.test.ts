@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  addBusinessDays,
   dateToZonedLocalInput,
   getTaskDayBounds,
   zonedLocalInputToIso,
@@ -79,5 +80,36 @@ describe("task timezone helpers", () => {
     ["2026-11-01T06:30:00Z", "2026-11-01T01:30"],
   ])("formats %s for a New York datetime-local input", (iso, input) => {
     expect(dateToZonedLocalInput(new Date(iso))).toBe(input);
+  });
+
+  it("skips a weekend when only one business day remains (Friday to Monday)", () => {
+    expect(addBusinessDays(new Date("2026-08-07T13:00:00.000Z"), 1)).toEqual(
+      new Date("2026-08-10T13:00:00.000Z")
+    );
+  });
+
+  it("adds business days within the same week without touching the weekend", () => {
+    expect(addBusinessDays(new Date("2026-08-10T13:00:00.000Z"), 3)).toEqual(
+      new Date("2026-08-13T13:00:00.000Z")
+    );
+  });
+
+  it("lands on the same weekday one week later for a 5 business day offset", () => {
+    expect(addBusinessDays(new Date("2026-08-05T13:00:00.000Z"), 5)).toEqual(
+      new Date("2026-08-12T13:00:00.000Z")
+    );
+    expect(addBusinessDays(new Date("2026-08-07T13:00:00.000Z"), 5)).toEqual(
+      new Date("2026-08-14T13:00:00.000Z")
+    );
+  });
+
+  it("preserves the New York wall-clock time across a daylight saving transition", () => {
+    // 2026-03-04 09:00 America/New_York is EST (UTC-5); five business days
+    // later, 2026-03-11 09:00 America/New_York is EDT (UTC-4) because
+    // daylight saving begins on 2026-03-08. A naive +7*24h shift would land
+    // an hour off; this must preserve the local wall-clock hour instead.
+    expect(addBusinessDays(new Date("2026-03-04T14:00:00.000Z"), 5)).toEqual(
+      new Date("2026-03-11T13:00:00.000Z")
+    );
   });
 });

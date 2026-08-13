@@ -2,11 +2,15 @@ import type { CrawlResult } from "./crawler";
 import type { AuditCategory, AuditFinding, AuditStatus } from "./types";
 
 const CONTACT_PATH = /\/contact\b/;
-const CONTACT_SIGNALS = /(mailto:|tel:|\bphone\b|\bemail\b|call us)/;
 const CALL_TO_ACTION = /(contact|call|book|request|quote|buy|schedule)/;
 const PRIVACY = /privacy/;
 const TERMS = /(terms|conditions|legal)/;
 const SITEMAP = /sitemap\.xml/;
+const PHONE_SIGNALS = /(tel:|\bphone\b|\bcall us\b)/;
+const EMAIL_SIGNALS = /(mailto:|\bemail\b)/;
+const BOOKING_SIGNALS =
+  /(book now|schedule an? appointment|calendly\.com|acuityscheduling\.com|square\.site\/appointments|book\.squareup\.com)/;
+const COPYRIGHT_YEAR = /(?:©|copyright)\D{0,10}(\d{4})/i;
 
 const finding = (
   category: AuditCategory,
@@ -75,7 +79,9 @@ export const evaluateChecks = (crawl: CrawlResult): AuditFinding[] => {
   );
   const brokenLinks = crawl.brokenInternalLinks;
   const hasContactPath = CONTACT_PATH.test(combined);
-  const hasContactSignals = CONTACT_SIGNALS.test(combined);
+  const hasPhoneSignal = PHONE_SIGNALS.test(combined);
+  const hasEmailSignal = EMAIL_SIGNALS.test(combined);
+  const hasBookingSignal = BOOKING_SIGNALS.test(combined);
   const hasCallToAction = CALL_TO_ACTION.test(combined);
   const hasPrivacy = PRIVACY.test(combined);
   const hasTerms = TERMS.test(combined);
@@ -83,6 +89,26 @@ export const evaluateChecks = (crawl: CrawlResult): AuditFinding[] => {
   const indexability: AuditStatus = noindex === 0 ? "PASS" : "WARNING";
   const redirectStatus = threshold(crawl.redirectCount, 1, 3);
   const brokenStatus = threshold(brokenLinks, 0, 1);
+  const brokenImagesStatus = threshold(crawl.brokenImages, 0, 1);
+  const copyrightMatch = COPYRIGHT_YEAR.exec(home.text);
+  const copyrightYear = copyrightMatch ? Number(copyrightMatch[1]) : null;
+  const currentYear = new Date().getUTCFullYear();
+  const copyrightStatus: AuditStatus =
+    copyrightYear === null || currentYear - copyrightYear <= 1
+      ? "PASS"
+      : "WARNING";
+  const bookingFinding: AuditFinding = {
+    ...finding(
+      "BOOKING",
+      "booking_detection",
+      "Booking detection",
+      hasBookingSignal ? "PASS" : "FAIL",
+      { found: hasBookingSignal }
+    ),
+    summary: hasBookingSignal
+      ? "A booking or scheduling signal was detected on the sampled pages."
+      : "No booking system detected on the sampled pages.",
+  };
 
   return [
     finding(
@@ -162,11 +188,19 @@ export const evaluateChecks = (crawl: CrawlResult): AuditFinding[] => {
     ),
     finding(
       "TRUST",
-      "contact_signals",
-      "Contact signals",
-      hasContactSignals ? "PASS" : "FAIL",
-      { found: hasContactSignals }
+      "phone_detection",
+      "Phone detection",
+      hasPhoneSignal ? "PASS" : "FAIL",
+      { found: hasPhoneSignal }
     ),
+    finding(
+      "TRUST",
+      "email_detection",
+      "Email detection",
+      hasEmailSignal ? "PASS" : "FAIL",
+      { found: hasEmailSignal }
+    ),
+    bookingFinding,
     finding(
       "TRUST",
       "calls_to_action",
@@ -188,6 +222,10 @@ export const evaluateChecks = (crawl: CrawlResult): AuditFinding[] => {
       hasTerms ? "PASS" : "WARNING",
       { found: hasTerms }
     ),
+    finding("TRUST", "copyright_year", "Copyright freshness", copyrightStatus, {
+      year: copyrightYear,
+      currentYear,
+    }),
     finding(
       "SEO",
       "canonical_url",
@@ -248,6 +286,9 @@ export const evaluateChecks = (crawl: CrawlResult): AuditFinding[] => {
       brokenStatus,
       { brokenLinks }
     ),
+    finding("TECHNICAL", "broken_images", "Broken images", brokenImagesStatus, {
+      brokenImages: crawl.brokenImages,
+    }),
     finding(
       "TECHNICAL",
       "viewport_meta",

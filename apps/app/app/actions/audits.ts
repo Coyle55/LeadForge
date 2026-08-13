@@ -24,9 +24,19 @@ const safeMessages: Record<string, string> = {
   INTERNAL_ERROR: "The website audit could not be completed.",
 };
 
-export const runProspectAudit = async (
+export type AuditForProspectOutcome =
+  | AuditActionError
+  | { status: "succeeded" | "failed"; auditId: string };
+
+// Redirect-free core of the single-prospect audit flow. Returns a status
+// instead of redirecting so it can also be driven from a sequential loop
+// (e.g. the discovery import-and-audit action), where a `redirect()` throw
+// on the first iteration would abort the rest of the batch. `runProspectAudit`
+// below is a thin, behavior-preserving wrapper around this for the existing
+// single-prospect UI action.
+export const runAuditForProspect = async (
   prospectId: string
-): Promise<AuditActionError | undefined> => {
+): Promise<AuditForProspectOutcome> => {
   const { userId } = await auth();
   if (!(userId && isAllowedUserId(userId))) {
     return { status: "error", message: "Not authorized." };
@@ -54,8 +64,10 @@ export const runProspectAudit = async (
     select: { id: true },
   });
   if (recent) {
-    redirect(`/audits/${recent.id}`);
-    return;
+    // An already-running recent audit is treated as a non-blocking success
+    // here -- redirecting straight to it is a UI-only concern that belongs
+    // in runProspectAudit's wrapper, not in this redirect-free core.
+    return { status: "succeeded", auditId: recent.id };
   }
   let audit: { id: string };
   try {
@@ -82,6 +94,11 @@ export const runProspectAudit = async (
           pagesAttempted: result.pagesAttempted,
           pagesAudited: result.pagesAudited,
           durationMs: result.durationMs,
+          screenshotUrl:
+            result.screenshot.status === "captured"
+              ? result.screenshot.url
+              : null,
+          screenshotStatus: result.screenshot.status,
           completedAt: new Date(),
         },
       }),
@@ -93,6 +110,7 @@ export const runProspectAudit = async (
       durationMs: result.durationMs,
       pagesAudited: result.pagesAudited,
     });
+    return { status: "succeeded", auditId: audit.id };
   } catch (error) {
     const code =
       typeof error === "object" && error && "code" in error
@@ -125,8 +143,18 @@ export const runProspectAudit = async (
       failureCode,
       error,
     });
+    return { status: "failed", auditId: audit.id };
+  }
+};
+
+export const runProspectAudit = async (
+  prospectId: string
+): Promise<AuditActionError | undefined> => {
+  const outcome = await runAuditForProspect(prospectId);
+  if (outcome.status === "error") {
+    return outcome;
   }
   revalidatePath("/audits");
   revalidatePath(`/prospects/${prospectId}`);
-  redirect(`/audits/${audit.id}`);
+  redirect(`/audits/${outcome.auditId}`);
 };

@@ -27,26 +27,61 @@ enum PipelineStage {
   LOST
 }
 
+enum BusinessCategory {
+  SALON_SPA
+  MEDICAL_DENTAL
+  HOME_SERVICES
+  AUTOMOTIVE
+  FITNESS
+  LEGAL_FINANCIAL
+  RESTAURANT_FOOD
+  RETAIL
+  PROFESSIONAL_SERVICES
+  OTHER
+}
+
+enum ProspectActivityType {
+  OUTREACH_SENT
+}
+
 model Prospect {
-  id            String        @id @default(cuid())
-  userId        String
-  businessName  String
-  websiteUrl    String?
-  contactName   String?
-  contactEmail  String?
-  phone         String?
-  location      String?
-  notes         String?
-  pipelineStage PipelineStage @default(NEW)
-  archivedAt    DateTime?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  deal          Deal?
-  tasks         Task[]
+  id               String             @id @default(cuid())
+  userId           String
+  businessName     String
+  websiteUrl       String?
+  contactName      String?
+  contactEmail     String?
+  phone            String?
+  location         String?
+  notes            String?
+  pipelineStage    PipelineStage      @default(NEW)
+  businessCategory BusinessCategory?
+  lastContactedAt  DateTime?
+  archivedAt       DateTime?
+  sourceProvider   String?
+  sourceExternalId String?
+  sourceUrls       Json?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  deal             Deal?
+  tasks            Task[]
+  activities       ProspectActivity[]
 
   @@index([userId, archivedAt])
   @@index([userId, pipelineStage])
   @@index([userId, createdAt])
+}
+
+model ProspectActivity {
+  id         String               @id @default(cuid())
+  userId     String
+  prospectId String
+  type       ProspectActivityType
+  occurredAt DateTime             @default(now())
+  metadata   Json?
+  prospect   Prospect             @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([userId, prospectId, occurredAt])
 }
 
 model Deal {
@@ -111,24 +146,27 @@ enum AuditCheckCategory {
   SEO
   TECHNICAL
   PERFORMANCE
+  BOOKING
 }
 
 model WebsiteAudit {
-  id             String             @id @default(cuid())
-  userId         String
-  prospectId     String
-  requestedUrl   String
-  finalUrl       String?
-  status         WebsiteAuditStatus @default(RUNNING)
-  failureCode    String?
-  failureMessage String?
-  pagesAttempted Int                @default(0)
-  pagesAudited   Int                @default(0)
-  durationMs     Int?
-  startedAt      DateTime           @default(now())
-  completedAt    DateTime?
-  createdAt      DateTime           @default(now())
-  checks         AuditCheck[]
+  id               String             @id @default(cuid())
+  userId           String
+  prospectId       String
+  requestedUrl     String
+  finalUrl         String?
+  status           WebsiteAuditStatus @default(RUNNING)
+  failureCode      String?
+  failureMessage   String?
+  pagesAttempted   Int                @default(0)
+  pagesAudited     Int                @default(0)
+  durationMs       Int?
+  screenshotUrl    String?
+  screenshotStatus String?
+  startedAt        DateTime           @default(now())
+  completedAt      DateTime?
+  createdAt        DateTime           @default(now())
+  checks           AuditCheck[]
 
   @@index([userId, createdAt])
   @@index([userId, prospectId, createdAt])
@@ -161,6 +199,32 @@ enum RecommendationLevel {
   LOW
 }
 
+enum OpportunityTier {
+  EXCELLENT
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum ScoringConfidence {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum ScoringMethod {
+  AI_LEGACY
+  DETERMINISTIC
+}
+
+enum ServiceCategory {
+  WEBSITE_REDESIGN
+  PERFORMANCE_OPTIMIZATION
+  BOOKING_INTEGRATION
+  LEAD_CAPTURE_REPAIR
+  LEAD_RESPONSE_AUTOMATION
+}
+
 model OpportunityAnalysis {
   id               String                      @id @default(cuid())
   userId           String
@@ -171,6 +235,15 @@ model OpportunityAnalysis {
   categoryScores   Json?
   executiveSummary String?
   overallRationale String?
+  tier             OpportunityTier?
+  scoringBreakdown Json?
+  topReasons       Json?
+  disqualifiers    Json?
+  strongestIssue   String?
+  suggestedOffer   String?
+  confidence       ScoringConfidence?
+  warnings         Json?
+  scoringMethod    ScoringMethod               @default(DETERMINISTIC)
   model            String
   promptVersion    String
   inputTokens      Int?
@@ -189,16 +262,18 @@ model OpportunityAnalysis {
 }
 
 model OpportunityRecommendation {
-  id             String              @id @default(cuid())
-  analysisId     String
-  position       Int
-  title          String
-  impact         RecommendationLevel
-  effort         RecommendationLevel
-  rationale      String
-  action         String
-  auditCheckKeys Json
-  analysis       OpportunityAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
+  id              String              @id @default(cuid())
+  analysisId      String
+  position        Int
+  title           String
+  impact          RecommendationLevel
+  effort          RecommendationLevel
+  rationale       String
+  action          String
+  auditCheckKeys  Json
+  serviceCategory ServiceCategory?
+  confidence      ScoringConfidence?
+  analysis        OpportunityAnalysis @relation(fields: [analysisId], references: [id], onDelete: Cascade)
 
   @@unique([analysisId, position])
   @@index([analysisId, impact])
@@ -220,6 +295,7 @@ enum OutreachDraftStatus {
   RUNNING
   COMPLETED
   FAILED
+  SENT
 }
 
 model OutreachDraft {
@@ -245,6 +321,9 @@ model OutreachDraft {
   durationMs          Int?
   failureCode         String?
   failureMessage      String?
+  sentAt              DateTime?
+  sentSubject         String?
+  sentBody            String?
   startedAt           DateTime            @default(now())
   completedAt         DateTime?
   createdAt           DateTime            @default(now())
@@ -254,4 +333,33 @@ model OutreachDraft {
   @@index([userId, prospectId, createdAt])
   @@index([userId, analysisId, createdAt])
   @@index([userId, recommendationId, createdAt])
+}
+
+model ProspectImportBatch {
+  id             String   @id @default(cuid())
+  userId         String
+  provider       String
+  reasoningModel String
+  query          String
+  location       String
+  requestedCount Int
+  returnedCount  Int
+  importedCount  Int
+  skippedCount   Int
+  failedCount    Int
+  createdAt      DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
+
+model ProspectDiscoveryCache {
+  id           String   @id @default(cuid())
+  userId       String
+  cacheKey     String
+  result       Json
+  inputTokens  Int?
+  outputTokens Int?
+  createdAt    DateTime @default(now())
+
+  @@unique([userId, cacheKey])
 }

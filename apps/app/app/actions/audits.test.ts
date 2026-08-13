@@ -85,6 +85,10 @@ describe("runProspectAudit", () => {
           evidence: { secure: true },
         },
       ],
+      screenshot: {
+        status: "captured",
+        url: "https://cdn.example.com/shot.png",
+      },
     });
     transactionMock.mockResolvedValue([]);
     const { runProspectAudit } = await import("./audits");
@@ -92,6 +96,14 @@ describe("runProspectAudit", () => {
     expect(prospectFindMock).toHaveBeenCalledWith({
       where: { id: "prospect_1", userId: "user_owner" },
       select: { id: true, websiteUrl: true },
+    });
+    expect(auditUpdateMock).toHaveBeenCalledWith({
+      where: { id: "audit_1" },
+      data: expect.objectContaining({
+        status: "COMPLETED",
+        screenshotUrl: "https://cdn.example.com/shot.png",
+        screenshotStatus: "captured",
+      }),
     });
     expect(auditCreateMock).toHaveBeenCalledWith({
       data: {
@@ -103,6 +115,35 @@ describe("runProspectAudit", () => {
     });
     expect(transactionMock).toHaveBeenCalled();
     expect(redirectMock).toHaveBeenCalledWith("/audits/audit_1");
+  });
+
+  it("persists a null screenshotUrl when the screenshot is unavailable", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    prospectFindMock.mockResolvedValue({
+      id: "prospect_1",
+      websiteUrl: "https://example.com",
+    });
+    auditCreateMock.mockResolvedValue({ id: "audit_1" });
+    runMock.mockResolvedValue({
+      requestedUrl: "https://example.com/",
+      finalUrl: "https://example.com/",
+      pagesAttempted: 1,
+      pagesAudited: 1,
+      durationMs: 100,
+      checks: [],
+      screenshot: { status: "unavailable", reason: "not_configured" },
+    });
+    transactionMock.mockResolvedValue([]);
+    const { runProspectAudit } = await import("./audits");
+    await runProspectAudit("prospect_1");
+    expect(auditUpdateMock).toHaveBeenCalledWith({
+      where: { id: "audit_1" },
+      data: expect.objectContaining({
+        status: "COMPLETED",
+        screenshotUrl: null,
+        screenshotStatus: "unavailable",
+      }),
+    });
   });
 
   it("stores a safe failed state when the engine rejects the target", async () => {
@@ -127,5 +168,82 @@ describe("runProspectAudit", () => {
       }),
     });
     expect(redirectMock).toHaveBeenCalledWith("/audits/audit_1");
+  });
+});
+
+describe("runAuditForProspect", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    auditFindMock.mockResolvedValue(null);
+  });
+
+  it("returns an error outcome for unauthorized callers without redirecting", async () => {
+    authMock.mockResolvedValueOnce({ userId: null });
+    const { runAuditForProspect } = await import("./audits");
+    await expect(runAuditForProspect("prospect_1")).resolves.toEqual({
+      status: "error",
+      message: "Not authorized.",
+    });
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("returns a succeeded outcome with the auditId when the audit completes, without redirecting", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    prospectFindMock.mockResolvedValue({
+      id: "prospect_1",
+      websiteUrl: "https://example.com",
+    });
+    auditCreateMock.mockResolvedValue({ id: "audit_1" });
+    runMock.mockResolvedValue({
+      requestedUrl: "https://example.com/",
+      finalUrl: "https://example.com/",
+      pagesAttempted: 1,
+      pagesAudited: 1,
+      durationMs: 100,
+      checks: [],
+      screenshot: { status: "unavailable", reason: "not_configured" },
+    });
+    transactionMock.mockResolvedValue([]);
+    const { runAuditForProspect } = await import("./audits");
+    await expect(runAuditForProspect("prospect_1")).resolves.toEqual({
+      status: "succeeded",
+      auditId: "audit_1",
+    });
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("returns a failed outcome without redirecting when the engine rejects the target", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    prospectFindMock.mockResolvedValue({
+      id: "prospect_1",
+      websiteUrl: "http://localhost",
+    });
+    auditCreateMock.mockResolvedValue({ id: "audit_1" });
+    runMock.mockRejectedValue(
+      Object.assign(new Error("secret host"), { code: "BLOCKED_TARGET" })
+    );
+    auditUpdateMock.mockResolvedValue({});
+    const { runAuditForProspect } = await import("./audits");
+    await expect(runAuditForProspect("prospect_1")).resolves.toEqual({
+      status: "failed",
+      auditId: "audit_1",
+    });
+    expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("treats an already-running recent audit as a non-blocking succeeded outcome without redirecting", async () => {
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    prospectFindMock.mockResolvedValue({
+      id: "prospect_1",
+      websiteUrl: "https://example.com",
+    });
+    auditFindMock.mockResolvedValue({ id: "audit_running" });
+    const { runAuditForProspect } = await import("./audits");
+    await expect(runAuditForProspect("prospect_1")).resolves.toEqual({
+      status: "succeeded",
+      auditId: "audit_running",
+    });
+    expect(redirectMock).not.toHaveBeenCalled();
+    expect(auditCreateMock).not.toHaveBeenCalled();
   });
 });
