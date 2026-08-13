@@ -1,6 +1,6 @@
 # LeadForge
 
-LeadForge is a private, single-owner lead workspace. M0 established authentication and persistence, M1 added manual prospect management, M2 added deterministic website audits, M3 turns completed audit evidence into AI-generated opportunity scoring and recommendations, M4 prepares editable outreach drafts from one selected recommendation, and M5 adds a fixed sales pipeline, one optional Deal per prospect, and manual follow-up Tasks.
+LeadForge is a private, single-owner lead workspace. M0 established authentication and persistence, M1 added manual prospect management, M2 added deterministic website audits, M3 turns completed audit evidence into AI-generated opportunity scoring and recommendations, M4 prepares editable outreach drafts from one selected recommendation, M5 adds a fixed sales pipeline, one optional Deal per prospect, and manual follow-up Tasks, M6 adds a Reports dashboard with pipeline funnel/conversion, win-rate, revenue, and activity trends over the trailing 12 months, and Phase 3 adds AI-powered prospect discovery: search for real local businesses by type and location, review AI-discovered candidates with their supporting evidence, and import only the ones worth pursuing.
 
 ## Requirements
 
@@ -37,15 +37,15 @@ The authenticated application routes are:
 - `/` — account and database overview
 - `/pipeline` — six-stage active-prospect pipeline and explicit stage controls
 - `/tasks` — filterable owner-scoped follow-up queue
-- `/prospects` — searchable, archive- and pipeline-stage-filtered prospect list
-- `/prospects/new` — create a prospect
-- `/prospects/[id]` — edit, archive, or restore an owned prospect
+- `/prospects` — searchable, archive- and pipeline-stage-filtered prospect list, with a "Discover Businesses" search that finds real local businesses by type and location, previews AI-discovered candidates with their supporting evidence, and imports only the ones the owner selects (optionally auditing each imported prospect immediately)
+- `/prospects/new` — create a prospect, including an optional manually-selected business category
+- `/prospects/[id]` — edit (including business category), archive, or restore an owned prospect
 - `/audits` — owner-scoped website audit history
 - `/audits/[id]` — grouped audit evidence and rerun controls
 - `/opportunities` — completed and failed opportunity-analysis history
 - `/opportunities/[id]` — evidence-linked score and recommendations
 - `/outreach` — completed and failed outreach-draft history
-- `/outreach/[id]` — edit, copy, or reset an evidence-grounded draft
+- `/outreach/[id]` — edit, copy, reset, or mark an evidence-grounded draft sent (recording `lastContactedAt`, a `ProspectActivity` entry, and an optional follow-up task)
 - `/reports` — pipeline funnel/conversion, win rate, revenue, and activity trends over the trailing 12 months
 - `/settings` — update the owner's display name and Outreach Profile
 

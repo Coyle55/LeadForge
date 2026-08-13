@@ -353,3 +353,112 @@ export const generateOutreachDraft = async (
   revalidateDraftPaths(recommendation.analysis.id, draft.id);
   redirect(`/outreach/${draft.id}`);
 };
+
+export interface OutreachSentResult {
+  message: string;
+  status: "success" | "error";
+}
+
+const OUTREACH_SENT_NOT_FOUND_MESSAGE = "Completed outreach draft not found.";
+
+class MarkOutreachSentRaceError extends Error {}
+
+const executeMarkOutreachSentTransaction = async ({
+  draftId,
+  userId,
+}: {
+  draftId: string;
+  userId: string;
+}) =>
+  await database.$transaction(async (transaction) => {
+    const draft = await transaction.outreachDraft.findFirst({
+      where: { id: draftId, userId, status: "COMPLETED" },
+      select: { id: true, prospectId: true, subject: true, body: true },
+    });
+    if (!(draft?.subject && draft.body)) {
+      return "not_found" as const;
+    }
+
+    const prospect = await transaction.prospect.findFirst({
+      where: { id: draft.prospectId, userId },
+      select: { id: true },
+    });
+    if (!prospect) {
+      return "not_found" as const;
+    }
+
+    const sentAt = new Date();
+    const draftResult = await transaction.outreachDraft.updateMany({
+      where: { id: draft.id, userId, status: "COMPLETED" },
+      data: {
+        status: "SENT",
+        sentAt,
+        sentSubject: draft.subject,
+        sentBody: draft.body,
+      },
+    });
+    if (draftResult.count !== 1) {
+      throw new MarkOutreachSentRaceError();
+    }
+
+    const prospectResult = await transaction.prospect.updateMany({
+      where: { id: prospect.id, userId },
+      data: { lastContactedAt: sentAt },
+    });
+    if (prospectResult.count !== 1) {
+      throw new MarkOutreachSentRaceError();
+    }
+
+    // Only ever advance a prospect out of NEW here; a prospect already
+    // moved along the pipeline (INTERESTED/PROPOSAL/WON/LOST) is untouched.
+    await transaction.prospect.updateMany({
+      where: { id: prospect.id, userId, pipelineStage: "NEW" },
+      data: { pipelineStage: "CONTACTED" },
+    });
+
+    await transaction.prospectActivity.create({
+      data: {
+        userId,
+        prospectId: prospect.id,
+        type: "OUTREACH_SENT",
+        metadata: { outreachDraftId: draft.id },
+      },
+    });
+
+    return { prospectId: prospect.id } as const;
+  });
+
+export const markOutreachSent = async (
+  draftId: string
+): Promise<OutreachSentResult> => {
+  const { userId } = await auth();
+  if (!(userId && isAllowedUserId(userId))) {
+    return { status: "error", message: "Not authorized." };
+  }
+
+  let outcome: "not_found" | { prospectId: string };
+  try {
+    outcome = await executeMarkOutreachSentTransaction({ draftId, userId });
+  } catch (error) {
+    if (error instanceof MarkOutreachSentRaceError) {
+      return { status: "error", message: OUTREACH_SENT_NOT_FOUND_MESSAGE };
+    }
+    logger.error("outreach.sent.failed", { userId, draftId });
+    return { status: "error", message: "Unable to mark outreach as sent." };
+  }
+
+  if (outcome === "not_found") {
+    return { status: "error", message: OUTREACH_SENT_NOT_FOUND_MESSAGE };
+  }
+
+  logger.info("outreach.sent.succeeded", {
+    userId,
+    draftId,
+    prospectId: outcome.prospectId,
+  });
+  revalidatePath("/outreach");
+  revalidatePath(`/outreach/${draftId}`);
+  revalidatePath(`/prospects/${outcome.prospectId}`);
+  revalidatePath("/pipeline");
+  return { status: "success", message: "Outreach marked as sent." };
+};

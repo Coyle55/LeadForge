@@ -11,6 +11,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getOutreachDraftDetail } from "../queries";
 import { DraftEditor } from "./draft-editor";
+import { MarkSentForm } from "./mark-sent-form";
 import { DraftSourceActions } from "./source-actions";
 
 const DraftDetailPage = async ({
@@ -130,7 +131,7 @@ const DraftDetailPage = async ({
           className="w-fit border-emerald-600/30 text-emerald-700"
           variant="outline"
         >
-          completed
+          {draft.status === "SENT" ? "sent" : "completed"}
         </Badge>
       </section>
 
@@ -161,13 +162,22 @@ const DraftDetailPage = async ({
             recommendationId={draft.recommendationId}
           />
         </CardHeader>
-        <CardContent className="pt-6">
+        <CardContent className="space-y-6 pt-6">
           <DraftEditor
             body={draft.body}
             draftId={draft.id}
             generatedBody={draft.generatedBody}
             generatedSubject={draft.generatedSubject}
             subject={draft.subject}
+          />
+          <MarkSentForm
+            businessName={draft.businessName}
+            draftId={draft.id}
+            prospectId={draft.prospectId}
+            sentAt={draft.sentAt}
+            sentBody={draft.sentBody}
+            sentSubject={draft.sentSubject}
+            status={draft.status === "SENT" ? "SENT" : "COMPLETED"}
           />
         </CardContent>
       </Card>

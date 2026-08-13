@@ -18,6 +18,7 @@ const order = { FAIL: 0, WARNING: 1, PASS: 2 } as const;
 const categories = [
   "ACCESSIBILITY",
   "TRUST",
+  "BOOKING",
   "SEO",
   "TECHNICAL",
   "PERFORMANCE",

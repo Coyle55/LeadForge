@@ -2,8 +2,8 @@
   "name": "app",
   "private": true,
   "scripts": {
-    "dev": "bun --bun next dev -p 3000",
-    "build": "bun --bun next build",
+    "dev": "bun --bun next dev -p 3000 --webpack",
+    "build": "bun --bun next build --webpack",
     "start": "bun --bun next start",
     "test": "NODE_ENV=test vitest run",
     "clean": "git clean -xdf .cache .turbo dist node_modules",

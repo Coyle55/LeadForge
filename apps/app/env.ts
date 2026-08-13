@@ -16,10 +16,16 @@ export const env = createEnv({
       (value) => (value === "" ? undefined : value),
       z.string().min(1).optional()
     ),
+    PROSPECT_DISCOVERY_CACHE_TTL_MINUTES: z.preprocess(
+      (value) => (value === "" || value === undefined ? undefined : value),
+      z.coerce.number().int().positive().default(60)
+    ),
   },
   client: {},
   runtimeEnv: {
     AI_GATEWAY_MODEL: process.env.AI_GATEWAY_MODEL,
     AI_GATEWAY_API_KEY: process.env.AI_GATEWAY_API_KEY,
+    PROSPECT_DISCOVERY_CACHE_TTL_MINUTES:
+      process.env.PROSPECT_DISCOVERY_CACHE_TTL_MINUTES,
   },
 });

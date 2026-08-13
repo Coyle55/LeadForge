@@ -33,6 +33,7 @@ const authorize = async () => {
 const parseForm = (formData: FormData) =>
   prospectSchema.safeParse({
     businessName: formData.get("businessName"),
+    businessCategory: formData.get("businessCategory"),
     contactEmail: formData.get("contactEmail"),
     contactName: formData.get("contactName"),
     location: formData.get("location"),

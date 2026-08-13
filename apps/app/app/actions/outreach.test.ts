@@ -8,6 +8,8 @@ const profileFindMock = vi.fn();
 const draftFindMock = vi.fn();
 const draftCreateMock = vi.fn();
 const draftUpdateMock = vi.fn();
+const prospectUpdateManyMock = vi.fn();
+const prospectActivityCreateMock = vi.fn();
 const transactionMock = vi.fn();
 const transactionQueryMock = vi.fn();
 const buildInputMock = vi.fn();
@@ -28,7 +30,10 @@ vi.mock("@repo/database", () => ({
   database: {
     $transaction: transactionMock,
     opportunityRecommendation: { findFirst: recommendationFindMock },
-    prospect: { findFirst: prospectFindMock },
+    prospect: {
+      findFirst: prospectFindMock,
+      updateMany: prospectUpdateManyMock,
+    },
     websiteAudit: { findFirst: auditFindMock },
     outreachProfile: { findUnique: profileFindMock },
     outreachDraft: {
@@ -36,6 +41,7 @@ vi.mock("@repo/database", () => ({
       create: draftCreateMock,
       updateMany: draftUpdateMock,
     },
+    prospectActivity: { create: prospectActivityCreateMock },
   },
 }));
 vi.mock("@repo/observability", () => ({
@@ -698,5 +704,199 @@ describe("generateOutreachDraft", () => {
       expect.anything()
     );
     expect(redirectMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("markOutreachSent", () => {
+  const sentTransaction = {
+    outreachDraft: {
+      findFirst: draftFindMock,
+      updateMany: draftUpdateMock,
+    },
+    prospect: {
+      findFirst: prospectFindMock,
+      updateMany: prospectUpdateManyMock,
+    },
+    prospectActivity: { create: prospectActivityCreateMock },
+  };
+
+  const completedDraft = {
+    id: "draft_1",
+    prospectId: "prospect_1",
+    subject: "A quick thought about Acme",
+    body: "Hi Jordan,\n\nI noticed a direct contact path was not found.",
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    authMock.mockResolvedValue({ userId: "user_owner" });
+    draftFindMock.mockResolvedValue(completedDraft);
+    prospectFindMock.mockResolvedValue({ id: "prospect_1" });
+    draftUpdateMock.mockResolvedValue({ count: 1 });
+    prospectUpdateManyMock.mockResolvedValue({ count: 1 });
+    prospectActivityCreateMock.mockResolvedValue({ id: "activity_1" });
+    transactionMock.mockImplementation(
+      async (callback: (client: typeof sentTransaction) => unknown) =>
+        await callback(sentTransaction)
+    );
+  });
+
+  it("rejects an unauthorized caller before opening a transaction", async () => {
+    authMock.mockResolvedValue({ userId: null });
+    const { markOutreachSent } = await import("./outreach");
+
+    await expect(markOutreachSent("draft_1")).resolves.toEqual({
+      status: "error",
+      message: "Not authorized.",
+    });
+    expect(transactionMock).not.toHaveBeenCalled();
+  });
+
+  it("sends a completed draft: snapshots the working copy, stamps contact time, and logs the activity", async () => {
+    const { markOutreachSent } = await import("./outreach");
+
+    await expect(markOutreachSent("draft_1")).resolves.toEqual({
+      status: "success",
+      message: "Outreach marked as sent.",
+    });
+
+    expect(draftFindMock).toHaveBeenCalledWith({
+      where: { id: "draft_1", userId: "user_owner", status: "COMPLETED" },
+      select: { id: true, prospectId: true, subject: true, body: true },
+    });
+    expect(draftUpdateMock).toHaveBeenCalledWith({
+      where: { id: "draft_1", userId: "user_owner", status: "COMPLETED" },
+      data: {
+        status: "SENT",
+        sentAt: expect.any(Date),
+        sentSubject: completedDraft.subject,
+        sentBody: completedDraft.body,
+      },
+    });
+    expect(prospectUpdateManyMock).toHaveBeenCalledWith({
+      where: { id: "prospect_1", userId: "user_owner" },
+      data: { lastContactedAt: expect.any(Date) },
+    });
+    expect(prospectActivityCreateMock).toHaveBeenCalledWith({
+      data: {
+        userId: "user_owner",
+        prospectId: "prospect_1",
+        type: "OUTREACH_SENT",
+        metadata: { outreachDraftId: "draft_1" },
+      },
+    });
+    expect(transactionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    "NEW",
+    "INTERESTED",
+    "PROPOSAL",
+    "WON",
+    "LOST",
+  ])("only advances pipelineStage from NEW to CONTACTED (stage: %s)", async (stage) => {
+    prospectUpdateManyMock.mockImplementation(
+      ({ where }: { where: Record<string, unknown> }) => {
+        if ("pipelineStage" in where) {
+          return Promise.resolve({ count: stage === "NEW" ? 1 : 0 });
+        }
+        return Promise.resolve({ count: 1 });
+      }
+    );
+    const { markOutreachSent } = await import("./outreach");
+
+    await expect(markOutreachSent("draft_1")).resolves.toEqual({
+      status: "success",
+      message: "Outreach marked as sent.",
+    });
+
+    expect(prospectUpdateManyMock).toHaveBeenCalledWith({
+      where: {
+        id: "prospect_1",
+        userId: "user_owner",
+        pipelineStage: "NEW",
+      },
+      data: { pipelineStage: "CONTACTED" },
+    });
+    const stageCalls = prospectUpdateManyMock.mock.calls.filter(
+      ([args]) => "pipelineStage" in args.where
+    );
+    expect(stageCalls).toHaveLength(1);
+  });
+
+  it("rejects a forged or cross-owner draft id with the same not-found style as other actions", async () => {
+    draftFindMock.mockResolvedValue(null);
+    const { markOutreachSent } = await import("./outreach");
+
+    await expect(markOutreachSent("draft_victim")).resolves.toEqual({
+      status: "error",
+      message: "Completed outreach draft not found.",
+    });
+    expect(prospectUpdateManyMock).not.toHaveBeenCalled();
+    expect(prospectActivityCreateMock).not.toHaveBeenCalled();
+    expect(draftUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "RUNNING",
+    "FAILED",
+    "SENT",
+  ])("rejects a draft that is not COMPLETED (status: %s) without leaking status detail", async () => {
+    // Scoping the fetch by status: "COMPLETED" means a RUNNING/FAILED/SENT
+    // draft simply will not be found by the where clause.
+    draftFindMock.mockResolvedValue(null);
+    const { markOutreachSent } = await import("./outreach");
+
+    await expect(markOutreachSent("draft_1")).resolves.toEqual({
+      status: "error",
+      message: "Completed outreach draft not found.",
+    });
+    expect(prospectUpdateManyMock).not.toHaveBeenCalled();
+    expect(prospectActivityCreateMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the owning prospect cannot be found", async () => {
+    prospectFindMock.mockResolvedValue(null);
+    const { markOutreachSent } = await import("./outreach");
+
+    await expect(markOutreachSent("draft_1")).resolves.toEqual({
+      status: "error",
+      message: "Completed outreach draft not found.",
+    });
+    expect(draftUpdateMock).not.toHaveBeenCalled();
+  });
+
+  it("performs the entire mutation atomically inside a single transaction", async () => {
+    const { markOutreachSent } = await import("./outreach");
+
+    await markOutreachSent("draft_1");
+
+    expect(transactionMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns a safe error and does not advance state when the draft update loses a race", async () => {
+    draftUpdateMock.mockResolvedValue({ count: 0 });
+    const { markOutreachSent } = await import("./outreach");
+
+    await expect(markOutreachSent("draft_1")).resolves.toEqual({
+      status: "error",
+      message: "Completed outreach draft not found.",
+    });
+    expect(prospectUpdateManyMock).not.toHaveBeenCalled();
+    expect(prospectActivityCreateMock).not.toHaveBeenCalled();
+  });
+
+  it("returns a safe persistence error when the transaction throws", async () => {
+    transactionMock.mockRejectedValue(new Error("database failure"));
+    const { markOutreachSent } = await import("./outreach");
+
+    await expect(markOutreachSent("draft_1")).resolves.toEqual({
+      status: "error",
+      message: "Unable to mark outreach as sent.",
+    });
+    expect(loggerErrorMock).toHaveBeenCalledWith("outreach.sent.failed", {
+      userId: "user_owner",
+      draftId: "draft_1",
+    });
   });
 });
